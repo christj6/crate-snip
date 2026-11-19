@@ -221,7 +221,8 @@ void WaveformView::mouseDown (const juce::MouseEvent& e)
     }
 
     drag = Drag::newRegion;
-    anchorFrame = frameAtX (e.position.x);
+    anchorX = e.position.x;
+    anchorFrame = frameAtX (anchorX);
     draft = {};
 }
 
@@ -230,14 +231,12 @@ void WaveformView::mouseDrag (const juce::MouseEvent& e)
     const auto frame = frameAtX (e.position.x);
     if (drag == Drag::newRegion)
     {
-        // A click that wobbles a pixel or two is still a click, not a sliver of a region.
-        constexpr int minimumDragPixels = 4;
-        if (draft.isEmpty() && e.getDistanceFromDragStartX() > -minimumDragPixels
-            && e.getDistanceFromDragStartX() < minimumDragPixels)
-            return;
-
-        draft = { juce::jmin (frame, anchorFrame), juce::jmax (frame, anchorFrame) };
-        repaint (plot());
+        const auto range = regionFromDrag (e.position.x);
+        if (range != draft)
+        {
+            draft = range;
+            repaint (plot());
+        }
     }
     else if (drag != Drag::none && onRegionResized)
     {
@@ -253,7 +252,10 @@ void WaveformView::mouseUp (const juce::MouseEvent& e)
     if (previousDrag != Drag::newRegion)
         return;
 
-    const auto completed = std::exchange (draft, FrameRange {});
+    if (! std::exchange (draft, FrameRange {}).isEmpty())
+        repaint (plot());
+
+    const auto completed = regionFromDrag (e.position.x);
     if (! completed.isEmpty())
     {
         if (onRegionCreated)
@@ -275,6 +277,16 @@ void WaveformView::mouseUp (const juce::MouseEvent& e)
             return;
         }
     }
+}
+
+FrameRange WaveformView::regionFromDrag (float x) const
+{
+    constexpr float minimumDragPixels = 4.0f;
+    if (std::abs (x - anchorX) < minimumDragPixels)
+        return {};
+
+    const auto frame = frameAtX (x);
+    return { juce::jmin (frame, anchorFrame), juce::jmax (frame, anchorFrame) };
 }
 
 void WaveformView::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel)

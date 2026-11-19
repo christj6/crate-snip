@@ -53,6 +53,7 @@ private:
     const Region* getRegion (int) const;
     float xForFrame (juce::int64 frame) const;
     juce::int64 frameAtX (float x) const;
+    FrameRange regionFromDrag (float x) const;
     juce::Rectangle<int> plot() const;
 
     const std::vector<Region>& regions;
@@ -70,6 +71,7 @@ private:
     FrameRange draft;
     Drag drag = Drag::none;
     juce::int64 anchorFrame = 0;
+    float anchorX = 0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (WaveformView)
 };
