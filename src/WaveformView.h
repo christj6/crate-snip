@@ -16,7 +16,7 @@ class WaveformView final : public juce::Component,
                            private juce::ScrollBar::Listener
 {
 public:
-    explicit WaveformView (juce::AudioFormatManager&);
+    WaveformView (juce::AudioFormatManager&, const std::vector<Region>&);
     ~WaveformView() override;
 
     void setTrack (const juce::File&, juce::int64 frames, double rate, std::optional<double> playheadSeconds);
@@ -26,11 +26,15 @@ public:
     void showPlayhead();
     void setPreviewFrame (std::optional<juce::int64>);
 
-    FrameRange getSelection() const noexcept { return selection; }
+    void setActiveRegion (int);
+    void revealRegion (int);
+
     bool hasTrack() const noexcept { return totalFrames > 0; }
     bool hasPlayhead() const noexcept { return playheadFrame.has_value(); }
 
-    std::function<void()> onSelectionChanged;
+    std::function<void (int)> onRegionSelected;
+    std::function<void (FrameRange)> onRegionCreated;
+    std::function<void (int, FrameRange)> onRegionResized;
 
 private:
     enum class Drag { none, newRegion, start, end };
@@ -46,11 +50,12 @@ private:
 
     void setView (double start, double length);
     void zoomAt (double factor, double fraction);
-    void setSelection (FrameRange);
+    const Region* getRegion (int) const;
     float xForFrame (juce::int64 frame) const;
     juce::int64 frameAtX (float x) const;
     juce::Rectangle<int> plot() const;
 
+    const std::vector<Region>& regions;
     juce::AudioThumbnailCache cache { 1 };
     juce::AudioThumbnail thumbnail;
     juce::ScrollBar scrollbar { false };
@@ -60,7 +65,9 @@ private:
     double viewStart = 0;
     double viewLength = 0;
     std::optional<juce::int64> playheadFrame, previewFrame;
-    FrameRange selection;
+    int activeRegion = -1;
+    int draggedRegion = -1;
+    FrameRange draft;
     Drag drag = Drag::none;
     juce::int64 anchorFrame = 0;
 

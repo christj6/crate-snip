@@ -21,6 +21,28 @@ std::unique_ptr<juce::AudioFormatReader> makeRegionReader (std::unique_ptr<juce:
     return section;
 }
 
+juce::String regionFilename (const Region& region)
+{
+    auto name = region.name.trim();
+    if (name.endsWithIgnoreCase (".wav"))
+        name = name.dropLastCharacters (4);
+
+    auto stem = juce::File::createLegalFileName (name).trim().trimCharactersAtEnd (" .");
+    if (stem.isEmpty())
+        return region.suggestedFilename;
+
+    const auto deviceName = stem.upToFirstOccurrenceOf (".", false, false).trimEnd().toUpperCase();
+    const auto last = deviceName.getLastCharacter();
+    const auto numberedDevice = deviceName.length() == 4
+                              && (deviceName.startsWith ("COM") || deviceName.startsWith ("LPT"))
+                              && ((last >= '1' && last <= '9') || last == 0xb9 || last == 0xb2 || last == 0xb3);
+    if (numberedDevice || deviceName == "CON" || deviceName == "PRN" || deviceName == "AUX"
+        || deviceName == "NUL" || deviceName == "CONIN$" || deviceName == "CONOUT$")
+        stem = "_" + stem;
+
+    return stem + ".wav";
+}
+
 ExportResult exportRegion (std::unique_ptr<juce::AudioFormatReader> reader, FrameRange region,
                            const juce::File& destination, const std::atomic_bool* cancelled)
 {
@@ -29,7 +51,8 @@ ExportResult exportRegion (std::unique_ptr<juce::AudioFormatReader> reader, Fram
     if (section == nullptr)
         return { {}, "Could not read the selected region." };
 
-    const auto target = destination.withFileExtension (".wav").getNonexistentSibling();
+    const auto requested = destination.withFileExtension (".wav");
+    auto target = requested.getNonexistentSibling();
     juce::TemporaryFile temporary (target);
     auto fileStream = temporary.getFile().createOutputStream();
     if (fileStream == nullptr)
@@ -75,11 +98,39 @@ ExportResult exportRegion (std::unique_ptr<juce::AudioFormatReader> reader, Fram
 
     // Move within the destination folder without replacing an existing file.
     const auto temporaryPath = temporary.getFile().getFullPathName();
-    const auto targetPath = target.getFullPathName();
-    if (! MoveFileW (temporaryPath.toWideCharPointer(), targetPath.toWideCharPointer()))
-        return { {}, "Could not save the finished WAV. Try another filename or folder." };
+    for (int attempt = 0; attempt < 16; ++attempt)
+    {
+        const auto targetPath = target.getFullPathName();
+        if (MoveFileW (temporaryPath.toWideCharPointer(), targetPath.toWideCharPointer()))
+            return { target, {} };
 
-    return { target, {} };
+        const auto error = GetLastError();
+        if (error != ERROR_ALREADY_EXISTS && error != ERROR_FILE_EXISTS)
+            break;
+
+        target = requested.getNonexistentSibling();
+    }
+    return { {}, "Could not save the finished WAV. Try another filename or folder." };
+}
+
+std::vector<ExportResult> exportRegions (const juce::File& source, const std::vector<Region>& regions,
+                                         const juce::File& folder, const std::atomic_bool* cancelled)
+{
+    juce::AudioFormatManager formats;
+    formats.registerBasicFormats();
+
+    std::vector<ExportResult> results;
+    results.reserve (regions.size());
+    for (const auto& region : regions)
+    {
+        if (cancelled != nullptr && cancelled->load())
+            break;
+
+        auto reader = std::unique_ptr<juce::AudioFormatReader> (formats.createReaderFor (source));
+        results.push_back (exportRegion (std::move (reader), region.frames,
+                                         folder.getChildFile (regionFilename (region)), cancelled));
+    }
+    return results;
 }
 
 } // namespace cratesnip

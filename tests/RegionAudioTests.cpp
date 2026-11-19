@@ -109,5 +109,44 @@ int runRegionAudioTests()
     const auto cancelled = cratesnip::exportRegion (openWav (source.getFile()), region, cancelledTarget.getFile(), &cancel);
     check (cancelled.error.isNotEmpty() && ! cancelledTarget.getFile().exists(),
            "cancelled export leaves no destination file");
+    juce::TemporaryFile batchDestination (".batch");
+    const auto folder = batchDestination.getFile();
+    if (folder.createDirectory().failed())
+    {
+        check (false, "create batch export folder");
+        return failures;
+    }
+
+    const std::vector<cratesnip::Region> cuts {
+        { { 0, 3 }, "Artist - Title - 01.wav", "Shared" },
+        { { 0, 20 }, "Artist - Title - 02.wav", "Invalid range" },
+        { { 7, 12 }, "Artist - Title - 03.wav", "Shared.wav" }
+    };
+    const auto batch = cratesnip::exportRegions (source.getFile(), cuts, folder);
+    check (batch.size() == 3, "one result for each cut");
+    if (batch.size() == 3)
+    {
+        check (batch[0].error.isEmpty() && batch[1].error.isNotEmpty() && batch[2].error.isEmpty(),
+               "a failed range does not prevent exporting the other cuts");
+        check (batch[0].file.getParentDirectory() == folder && batch[2].file.getParentDirectory() == folder,
+               "batch uses the chosen folder for all files");
+        check (batch[0].file.getFileName() == "Shared.wav" && batch[2].file != batch[0].file,
+               "duplicate edited filenames stay distinct");
+        const auto first = openWav (batch[0].file);
+        const auto last = openWav (batch[2].file);
+        check (first != nullptr && first->lengthInSamples == 3 && last != nullptr && last->lengthInSamples == 5,
+               "non-adjacent cuts keep their independent lengths");
+    }
+    for (const auto& item : batch)
+        if (item.file.getParentDirectory() == folder)
+            item.file.deleteFile();
+
+    folder.deleteFile();
+
+    const cratesnip::Region fallback { { 1, 2 }, "Artist - Title - 02.wav", " .wav " };
+    check (cratesnip::regionFilename (fallback) == fallback.suggestedFilename, "empty edited name uses its suggestion");
+    const cratesnip::Region reserved { { 1, 2 }, "Artist - Title - 02.wav", "CON.wav" };
+    check (cratesnip::regionFilename (reserved) == "_CON.wav", "reserved device name becomes a filename");
+
     return failures;
 }

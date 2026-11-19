@@ -4,27 +4,85 @@
 
 namespace cratesnip
 {
+namespace
+{
+
+juce::PropertiesFile::Options exportSettingsOptions()
+{
+    static juce::InterProcessLock lock ("CrateSnip.ExportFolder");
+    juce::PropertiesFile::Options options;
+    options.applicationName = "CrateSnip";
+    options.filenameSuffix = "settings";
+    options.millisecondsBeforeSaving = -1;
+    options.processLock = &lock;
+    return options;
+}
+
+juce::File loadExportFolder()
+{
+    const juce::PropertiesFile settings { exportSettingsOptions() };
+    const auto path = settings.getValue ("exportFolder");
+    return juce::File::isAbsolutePath (path) ? juce::File (path) : juce::File();
+}
+
+bool saveExportFolder (const juce::File& folder)
+{
+    juce::PropertiesFile settings { exportSettingsOptions() };
+    settings.setValue ("exportFolder", folder.getFullPathName());
+    return settings.saveIfNeeded();
+}
+
+juce::String rangeText (FrameRange range, double sampleRate)
+{
+    return formatTime (static_cast<double> (range.getStart()) / sampleRate)
+           + " to " + formatTime (static_cast<double> (range.getEnd()) / sampleRate);
+}
+
+} // namespace
 
 EditorComponent::EditorComponent (LaunchRequest launchRequest)
     : request (std::move (launchRequest))
 {
-    juce::Component* const components[] { &waveform, &trackTitle, &trackInfo, &selectionInfo, &status,
-                                          &zoomIn, &zoomOut, &fit, &playhead, &preview, &exportWav,
-                                          &pauseFoobar, &resumeFoobar };
+    juce::Component* const components[] { &waveform, &trackTitle, &trackInfo, &selectionInfo, &folderInfo,
+                                          &status, &zoomIn, &zoomOut, &fit, &playhead, &preview,
+                                          &exportWav, &folderButton, &pauseFoobar, &resumeFoobar,
+                                          &regionsTitle, &regionList, &filenameLabel, &filename, &remove };
     for (auto* component : components)
         addAndMakeVisible (component);
 
     trackTitle.setFont (juce::FontOptions (26.0f, juce::Font::bold));
     trackInfo.setColour (juce::Label::textColourId, juce::Colour (0xffa6b2c1));
     status.setColour (juce::Label::textColourId, juce::Colour (0xffbac4cf));
+    folderInfo.setColour (juce::Label::textColourId, juce::Colour (0xffa6b2c1));
+    regionsTitle.setText ("Regions", juce::dontSendNotification);
+    regionsTitle.setFont (juce::FontOptions (16.0f, juce::Font::bold));
+    filenameLabel.setText ("WAV filename", juce::dontSendNotification);
+    filename.setTitle ("WAV filename");
+    filename.setSelectAllWhenFocused (true);
+    regionList.setTitle ("Regions");
+    regionList.setModel (this);
+    regionList.setRowHeight (49);
+    regionList.setColour (juce::ListBox::backgroundColourId, juce::Colour (0xff161c24));
+    filename.onTextChange = [this]
+    {
+        if (auto* active = getRegion (activeRegion))
+        {
+            active->name = filename.getText();
+            regionList.repaintRow (activeRegion);
+        }
+    };
+    remove.onClick = [this] { removeRegion(); };
 
     zoomIn.onClick = [this] { waveform.zoom (0.5); };
     zoomOut.onClick = [this] { waveform.zoom (2.0); };
     fit.onClick = [this] { waveform.fitTrack(); };
     playhead.onClick = [this] { waveform.showPlayhead(); };
     preview.onClick = [this] { togglePreview(); };
-    exportWav.onClick = [this] { chooseExport(); };
-    waveform.onSelectionChanged = [this] { selectionChanged(); };
+    exportWav.onClick = [this] { exportAll(); };
+    folderButton.onClick = [this] { chooseFolder (false); };
+    waveform.onRegionCreated = [this] (FrameRange range) { addRegion (range); };
+    waveform.onRegionSelected = [this] (int index) { selectRegion (index); };
+    waveform.onRegionResized = [this] (int index, FrameRange range) { resizeRegion (index, range); };
     pauseFoobar.onClick = [this]
     {
         const auto error = foobar.pause();
@@ -42,12 +100,14 @@ EditorComponent::EditorComponent (LaunchRequest launchRequest)
     resumeFoobar.setEnabled (hasFoobar);
     formats.registerBasicFormats();
     openTrack();
-    selectionChanged();
-    setSize (960, 560);
+    refreshFolder();
+    selectRegion (-1);
+    setSize (1040, 620);
 }
 
 EditorComponent::~EditorComponent()
 {
+    regionList.setModel (nullptr);
     chooser.reset();
     cancelExport.store (true);
     exportThread.removeAllJobs (true, -1);
@@ -92,37 +152,140 @@ void EditorComponent::openTrack()
         setStatus (request.problems[0]);
 }
 
-void EditorComponent::selectionChanged()
+int EditorComponent::getNumRows()
 {
-    if (previewSource != nullptr)
-        stopPreview();
+    return static_cast<int> (regions.size());
+}
 
-    const auto region = waveform.getSelection();
-    juce::String description;
-    if (waveform.hasTrack())
+Region* EditorComponent::getRegion (int index)
+{
+    return index >= 0 && index < getNumRows() ? &regions[static_cast<size_t> (index)] : nullptr;
+}
+
+juce::String EditorComponent::getNameForRow (int row)
+{
+    if (const auto* region = getRegion (row))
+        return regionFilename (*region);
+    return {};
+}
+
+void EditorComponent::paintListBoxItem (int row, juce::Graphics& g, int width, int height, bool selected)
+{
+    const auto* region = getRegion (row);
+    if (region == nullptr)
+        return;
+
+    g.fillAll (juce::Colour (selected ? 0xff274867 : 0xff161c24));
+    g.setColour (juce::Colour (0xfff0f4f7));
+    g.setFont (14.0f);
+    g.drawText (regionFilename (*region), 10, 5, width - 20, 20, juce::Justification::centredLeft);
+    g.setColour (juce::Colour (0xffafbfce));
+    g.setFont (12.0f);
+    g.drawText (rangeText (region->frames, sourceRate), 10, 25, width - 20, 18, juce::Justification::centredLeft);
+    g.setColour (juce::Colour (0xff2c3744));
+    g.fillRect (0, height - 1, width, 1);
+}
+
+void EditorComponent::selectedRowsChanged (int row)
+{
+    selectRegion (row);
+    waveform.revealRegion (row);
+}
+
+void EditorComponent::deleteKeyPressed (int row)
+{
+    if (row == activeRegion)
+        removeRegion();
+}
+
+void EditorComponent::addRegion (FrameRange range)
+{
+    auto stem = request.suggestedBaseName();
+    if (stem.isEmpty())
+        stem = "Sample";
+
+    const auto suffix = " - " + juce::String (nextRegionNumber++).paddedLeft ('0', 2);
+    const auto name = stem.substring (0, 128 - suffix.length()).trimEnd() + suffix + ".wav";
+    regions.push_back ({ range, name, name });
+    regionList.updateContent();
+    selectRegion (getNumRows() - 1);
+}
+
+void EditorComponent::selectRegion (int index)
+{
+    const auto* region = getRegion (index);
+    const auto selected = region != nullptr ? index : -1;
+    if (activeRegion != selected)
+        stopPreview();
+    activeRegion = selected;
+
+    juce::SparseSet<int> rows;
+    if (region != nullptr)
+        rows.addRange ({ selected, selected + 1 });
+    regionList.setSelectedRows (rows, juce::dontSendNotification);
+    if (region != nullptr)
+        regionList.scrollToEnsureRowIsOnscreen (selected);
+
+    waveform.setActiveRegion (selected);
+    filename.setText (region != nullptr ? region->name : juce::String(), false);
+    updateSelectionInfo();
+    updateControls();
+}
+
+void EditorComponent::resizeRegion (int index, FrameRange range)
+{
+    if (auto* region = getRegion (index); region != nullptr && region->frames != range)
     {
-        if (region.isEmpty())
-            description = "Drag across the waveform to select a region.";
-        else
-            description << formatTime (static_cast<double> (region.getStart()) / sourceRate) << " to "
-                        << formatTime (static_cast<double> (region.getEnd()) / sourceRate) << "  |  "
-                        << formatTime (static_cast<double> (region.getLength()) / sourceRate)
-                        << "  |  " << region.getLength() << " frames";
+        stopPreview();
+        region->frames = range;
+        waveform.repaint();
+        regionList.repaintRow (index);
+        updateSelectionInfo();
+    }
+}
+
+void EditorComponent::removeRegion()
+{
+    if (getRegion (activeRegion) == nullptr)
+        return;
+
+    stopPreview();
+    const auto removedIndex = activeRegion;
+    regions.erase (regions.begin() + removedIndex);
+    regionList.updateContent();
+    selectRegion (juce::jmin (removedIndex, getNumRows() - 1));
+}
+
+void EditorComponent::updateSelectionInfo()
+{
+    juce::String description;
+    if (const auto* active = getRegion (activeRegion))
+    {
+        const auto range = active->frames;
+        description << rangeText (range, sourceRate) << "  |  "
+                    << formatTime (static_cast<double> (range.getLength()) / sourceRate)
+                    << "  |  " << range.getLength() << " frames";
+    }
+    else if (waveform.hasTrack())
+    {
+        description = "Drag across the waveform to add a region.";
     }
     selectionInfo.setText (description, juce::dontSendNotification);
-    updateControls();
 }
 
 void EditorComponent::updateControls()
 {
-    const auto hasSelection = ! waveform.getSelection().isEmpty();
+    const auto hasSelection = getRegion (activeRegion) != nullptr;
     zoomIn.setEnabled (waveform.hasTrack());
     zoomOut.setEnabled (waveform.hasTrack());
     fit.setEnabled (waveform.hasTrack());
     playhead.setEnabled (waveform.hasPlayhead());
     preview.setEnabled (hasSelection);
     preview.setButtonText (previewSource == nullptr ? "Preview" : "Stop preview");
-    exportWav.setEnabled (hasSelection && ! choosing && ! exporting);
+    filename.setEnabled (hasSelection);
+    remove.setEnabled (hasSelection);
+    folderButton.setEnabled (! choosing && ! exporting);
+    exportWav.setEnabled (! regions.empty() && ! choosing && ! exporting);
 }
 
 void EditorComponent::togglePreview()
@@ -133,9 +296,10 @@ void EditorComponent::togglePreview()
         return;
     }
 
-    previewRange = waveform.getSelection();
-    if (previewRange.isEmpty())
+    const auto* active = getRegion (activeRegion);
+    if (active == nullptr)
         return;
+    previewRange = active->frames;
 
     auto reader = makeRegionReader (std::unique_ptr<juce::AudioFormatReader> (formats.createReaderFor (request.file)),
                                     previewRange);
@@ -199,66 +363,115 @@ void EditorComponent::timerCallback()
     waveform.setPreviewFrame (juce::jmin (previewRange.getEnd(), previewRange.getStart() + elapsed));
 }
 
-void EditorComponent::chooseExport()
+void EditorComponent::refreshFolder()
 {
-    const auto region = waveform.getSelection();
-    if (region.isEmpty() || choosing || exporting)
+    if (! useSessionFolder)
+        exportFolder = loadExportFolder();
+
+    juce::String description = "No export folder selected";
+    if (exportFolder != juce::File())
+    {
+        description = "Export folder  " + exportFolder.getFullPathName();
+        if (! exportFolder.isDirectory())
+            description += " (unavailable)";
+        else if (useSessionFolder)
+            description += " (this window)";
+    }
+    folderInfo.setText (description, juce::dontSendNotification);
+    folderInfo.setTooltip (description);
+}
+
+void EditorComponent::exportAll()
+{
+    if (regions.empty() || choosing || exporting)
         return;
 
-    auto stem = request.suggestedBaseName();
-    if (stem.isEmpty())
-        stem = "Sample";
-    const auto suggested = request.file.getSiblingFile (stem + " - 01.wav").getNonexistentSibling();
-    chooser = std::make_unique<juce::FileChooser> ("Export selected region", suggested, "*.wav", false, false, this);
+    refreshFolder();
+    if (exportFolder.isDirectory())
+        beginExport();
+    else
+        chooseFolder (true);
+}
+
+void EditorComponent::chooseFolder (bool exportAfterChoosing)
+{
+    if (choosing || exporting)
+        return;
+
+    refreshFolder();
+    const auto initialFolder = exportFolder.isDirectory() ? exportFolder : request.file.getParentDirectory();
+    chooser = std::make_unique<juce::FileChooser> ("Choose export folder", initialFolder, "*", false, false, this);
     choosing = true;
     updateControls();
 
-    chooser->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles,
-                          [safe = juce::Component::SafePointer<EditorComponent> (this), region] (const auto& dialog)
+    chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectDirectories,
+                          [safe = juce::Component::SafePointer<EditorComponent> (this), exportAfterChoosing]
+                          (const auto& dialog)
                           {
                               if (safe == nullptr)
                                   return;
+
                               safe->choosing = false;
-                              const auto destination = dialog.getResult();
-                              if (destination != juce::File())
-                                  safe->beginExport (region, destination);
+                              const auto folder = dialog.getResult();
+                              if (folder.isDirectory())
+                              {
+                                  safe->exportFolder = folder;
+                                  safe->useSessionFolder = ! saveExportFolder (folder);
+                                  safe->refreshFolder();
+                                  safe->setStatus ({});
+                                  if (exportAfterChoosing)
+                                      safe->beginExport();
+                              }
                               safe->updateControls();
                           });
 }
 
-void EditorComponent::beginExport (FrameRange region, const juce::File& destination)
+void EditorComponent::beginExport()
 {
-    auto reader = std::unique_ptr<juce::AudioFormatReader> (formats.createReaderFor (request.file));
-    if (reader == nullptr)
-    {
-        setStatus ("Could not reopen the source audio file.");
+    if (regions.empty())
         return;
-    }
 
     exporting = true;
-    setStatus ("Exporting WAV...");
-    exportThread.addJob ([safe = juce::Component::SafePointer<EditorComponent> (this),
-                          reader = std::move (reader), region, destination, cancelled = &cancelExport]() mutable
+    updateControls();
+    setStatus ("Exporting " + juce::String (getNumRows()) + (getNumRows() == 1 ? " region..." : " regions..."));
+    exportThread.addJob ([safe = juce::Component::SafePointer<EditorComponent> (this), source = request.file,
+                          cuts = regions, folder = exportFolder, cancelled = &cancelExport]() mutable
     {
-        const auto result = exportRegion (std::move (reader), region, destination, cancelled);
-        juce::MessageManager::callAsync ([safe, result]
+        auto results = exportRegions (source, cuts, folder, cancelled);
+        juce::MessageManager::callAsync ([safe, cuts = std::move (cuts), results = std::move (results)]
         {
             if (safe != nullptr)
-                safe->exportFinished (result);
+                safe->exportFinished (cuts, results);
         });
     });
 }
 
-void EditorComponent::exportFinished (const ExportResult& result)
+void EditorComponent::exportFinished (const std::vector<Region>& cuts, const std::vector<ExportResult>& results)
 {
     exporting = false;
-    setStatus (result.error.isEmpty() ? "Saved " + result.file.getFullPathName() : result.error);
+    int saved = 0;
+    juce::StringArray errors;
+    for (size_t i = 0; i < results.size(); ++i)
+    {
+        if (results[i].error.isEmpty())
+            ++saved;
+        else
+            errors.add (regionFilename (cuts[i]) + " - " + results[i].error);
+    }
+
+    const auto summary = "Exported " + juce::String (saved) + " of " + juce::String (cuts.size()) + " WAV files.";
+    setStatus (summary);
     updateControls();
+    if (! errors.isEmpty())
+        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon,
+                                               "Some regions could not be exported",
+                                               summary + "\n\n" + errors.joinIntoString ("\n"));
 }
 
 void EditorComponent::setStatus (const juce::String& message)
 {
     status.setText (message, juce::dontSendNotification);
+    status.setTooltip (message);
 }
 
 void EditorComponent::paint (juce::Graphics& g)
@@ -281,18 +494,29 @@ void EditorComponent::resized()
     }
     area.removeFromTop (10);
 
-    status.setBounds (area.removeFromBottom (26));
+    status.setBounds (area.removeFromBottom (24));
+    folderInfo.setBounds (area.removeFromBottom (24));
     auto actions = area.removeFromBottom (36);
-    for (auto* button : { &preview, &exportWav })
+    for (auto* button : { &preview, &exportWav, &folderButton })
     {
-        button->setBounds (actions.removeFromLeft (124));
+        button->setBounds (actions.removeFromLeft (116));
         actions.removeFromLeft (8);
     }
     resumeFoobar.setBounds (actions.removeFromRight (130));
     actions.removeFromRight (8);
     pauseFoobar.setBounds (actions.removeFromRight (130));
+    area.removeFromBottom (10);
 
-    area.removeFromBottom (6);
+    auto side = area.removeFromRight (260);
+    area.removeFromRight (14);
+    regionsTitle.setBounds (side.removeFromTop (26));
+    auto nameControls = side.removeFromBottom (91);
+    filenameLabel.setBounds (nameControls.removeFromTop (23));
+    filename.setBounds (nameControls.removeFromTop (29));
+    nameControls.removeFromTop (7);
+    remove.setBounds (nameControls.removeFromLeft (116));
+    regionList.setBounds (side);
+
     selectionInfo.setBounds (area.removeFromBottom (28));
     waveform.setBounds (area);
 }

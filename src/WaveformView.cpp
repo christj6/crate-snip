@@ -1,6 +1,7 @@
 #include "WaveformView.h"
 
 #include <cmath>
+#include <utility>
 
 namespace cratesnip
 {
@@ -13,8 +14,8 @@ juce::String formatTime (double seconds)
            + juce::String (milliseconds % 1000).paddedLeft ('0', 3);
 }
 
-WaveformView::WaveformView (juce::AudioFormatManager& formats)
-    : thumbnail (512, formats, cache)
+WaveformView::WaveformView (juce::AudioFormatManager& formats, const std::vector<Region>& trackRegions)
+    : regions (trackRegions), thumbnail (512, formats, cache)
 {
     thumbnail.addChangeListener (this);
     scrollbar.setAutoHide (false);
@@ -140,20 +141,29 @@ void WaveformView::paint (juce::Graphics& g)
     {
         const juce::Graphics::ScopedSaveState clip (g);
         g.reduceClipRegion (area);
-        if (! selection.isEmpty())
+        const auto drawRegion = [&] (FrameRange range, bool active)
         {
-            const auto leftX = xForFrame (selection.getStart());
-            const auto rightX = xForFrame (selection.getEnd());
-            g.setColour (juce::Colour (0x5538a6ef));
+            const auto leftX = xForFrame (range.getStart());
+            const auto rightX = xForFrame (range.getEnd());
+            g.setColour (juce::Colour (active ? 0x6638a6ef : 0x3338a6ef));
             g.fillRect (juce::Rectangle<float> (leftX, 0, rightX - leftX, static_cast<float> (area.getHeight()))
                             .getIntersection (area.toFloat()));
 
-            g.setColour (juce::Colour (0xff8ed4ff));
+            g.setColour (juce::Colour (active ? 0xff8ed4ff : 0xff547384));
+            const auto width = active ? 2.0f : 1.0f;
             for (const auto x : { leftX, rightX })
                 if (x >= 0 && x <= static_cast<float> (area.getRight()))
-                    g.fillRect (juce::jmin (x, static_cast<float> (area.getRight()) - 2.0f), 0.0f, 2.0f,
+                    g.fillRect (juce::jmin (x, static_cast<float> (area.getRight()) - width), 0.0f, width,
                                 static_cast<float> (area.getHeight()));
-        }
+        };
+
+        for (int i = 0; i < static_cast<int> (regions.size()); ++i)
+            if (i != activeRegion)
+                drawRegion (regions[static_cast<size_t> (i)].frames, false);
+        if (const auto* active = getRegion (activeRegion))
+            drawRegion (active->frames, true);
+        if (! draft.isEmpty())
+            drawRegion (draft, true);
 
         const auto drawMarker = [&] (std::optional<juce::int64> frame, juce::Colour colour)
         {
@@ -197,41 +207,68 @@ void WaveformView::mouseDown (const juce::MouseEvent& e)
         return;
 
     grabKeyboardFocus();
-    const auto frame = frameAtX (e.position.x);
-    if (! selection.isEmpty())
+    if (const auto* active = getRegion (activeRegion); active != nullptr && ! e.mods.isShiftDown())
     {
-        const auto distanceToStart = std::abs (e.position.x - xForFrame (selection.getStart()));
-        const auto distanceToEnd = std::abs (e.position.x - xForFrame (selection.getEnd()));
+        const auto distanceToStart = std::abs (e.position.x - xForFrame (active->frames.getStart()));
+        const auto distanceToEnd = std::abs (e.position.x - xForFrame (active->frames.getEnd()));
         if (juce::jmin (distanceToStart, distanceToEnd) <= 9.0f)
         {
             drag = distanceToStart <= distanceToEnd ? Drag::start : Drag::end;
-            anchorFrame = drag == Drag::start ? selection.getEnd() : selection.getStart();
+            anchorFrame = drag == Drag::start ? active->frames.getEnd() : active->frames.getStart();
+            draggedRegion = activeRegion;
             return;
         }
     }
 
     drag = Drag::newRegion;
-    anchorFrame = frame;
-    setSelection ({ frame, frame });
+    anchorFrame = frameAtX (e.position.x);
+    draft = {};
 }
 
 void WaveformView::mouseDrag (const juce::MouseEvent& e)
 {
-    if (drag == Drag::none)
-        return;
-
     const auto frame = frameAtX (e.position.x);
-    if (drag == Drag::start)
-        setSelection ({ juce::jmin (frame, anchorFrame - 1), anchorFrame });
-    else if (drag == Drag::end)
-        setSelection ({ anchorFrame, juce::jmax (frame, anchorFrame + 1) });
-    else
-        setSelection ({ juce::jmin (frame, anchorFrame), juce::jmax (frame, anchorFrame) });
+    if (drag == Drag::newRegion)
+    {
+        draft = { juce::jmin (frame, anchorFrame), juce::jmax (frame, anchorFrame) };
+        repaint (plot());
+    }
+    else if (drag != Drag::none && onRegionResized)
+    {
+        const auto range = drag == Drag::start ? FrameRange { juce::jmin (frame, anchorFrame - 1), anchorFrame }
+                                               : FrameRange { anchorFrame, juce::jmax (frame, anchorFrame + 1) };
+        onRegionResized (draggedRegion, range);
+    }
 }
 
-void WaveformView::mouseUp (const juce::MouseEvent&)
+void WaveformView::mouseUp (const juce::MouseEvent& e)
 {
-    drag = Drag::none;
+    const auto previousDrag = std::exchange (drag, Drag::none);
+    if (previousDrag != Drag::newRegion)
+        return;
+
+    const auto completed = std::exchange (draft, FrameRange {});
+    if (! completed.isEmpty())
+    {
+        if (onRegionCreated)
+            onRegionCreated (completed);
+        repaint (plot());
+        return;
+    }
+
+    const auto frame = frameAtX (e.position.x);
+    if (! onRegionSelected || ! plot().contains (e.getPosition()))
+        return;
+    if (const auto* active = getRegion (activeRegion); active != nullptr && active->frames.contains (frame))
+        return;
+    for (int i = static_cast<int> (regions.size()) - 1; i >= 0; --i)
+    {
+        if (regions[static_cast<size_t> (i)].frames.contains (frame))
+        {
+            onRegionSelected (i);
+            return;
+        }
+    }
 }
 
 void WaveformView::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel)
@@ -250,14 +287,25 @@ void WaveformView::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseW
     zoomAt (std::pow (2.0, -2.0 * wheel.deltaY), fraction);
 }
 
-void WaveformView::setSelection (FrameRange range)
+const Region* WaveformView::getRegion (int index) const
 {
-    if (selection != range)
+    return index >= 0 && static_cast<size_t> (index) < regions.size() ? &regions[static_cast<size_t> (index)] : nullptr;
+}
+
+void WaveformView::setActiveRegion (int index)
+{
+    activeRegion = index;
+    repaint (plot());
+}
+
+void WaveformView::revealRegion (int index)
+{
+    if (const auto* region = getRegion (index))
     {
-        selection = range;
-        repaint (plot());
-        if (onSelectionChanged)
-            onSelectionChanged();
+        const auto first = static_cast<double> (region->frames.getStart());
+        const auto last = static_cast<double> (region->frames.getEnd());
+        if (first < viewStart || last > viewStart + viewLength)
+            setView (first - juce::jmax (0.0, viewLength - (last - first)) * 0.5, viewLength);
     }
 }
 
