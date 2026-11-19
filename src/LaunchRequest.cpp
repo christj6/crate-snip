@@ -49,10 +49,21 @@ namespace
                 word.clear();
             }
         };
+        const auto isAlphanumeric = [&] (size_t i)
+        {
+            return i < text.size() && (types[i] & (C1_ALPHA | C1_DIGIT)) != 0;
+        };
+
         for (size_t i = 0; i < text.size(); ++i)
         {
             const auto character = text[i];
             if (character == L'\'' || character == L'\u2019')
+                continue;
+
+            // A symbol inside a word is part of it (A$AP, P!nk), not a break between words.
+            // Separators such as AC/DC and Jay-Z still split.
+            if ((types[i] & C1_PUNCT) != 0 && i > 0 && isAlphanumeric (i - 1) && isAlphanumeric (i + 1)
+                && std::wstring_view (L"/\\-_.,:;&+").find (character) == std::wstring_view::npos)
                 continue;
             if ((types[i] & (C1_SPACE | C1_BLANK | C1_PUNCT | C1_CNTRL)) != 0)
                 addWord();

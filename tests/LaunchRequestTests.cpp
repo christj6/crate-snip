@@ -71,6 +71,10 @@ void testCamelCaseFilenames()
     request.title = "Ain't No Rest";
     check (request.suggestedFilename (1) == "cageTheElephant-aintNoRest-chunk1.wav", "interior artist article and apostrophe");
 
+    request.artist = "A$AP Rocky";
+    request.title = "Jay-Z & P!nk";
+    check (request.suggestedFilename (1) == "aapRocky-jayZPnk-chunk1.wav", "symbols inside words are dropped, separators split");
+
     request.artist = juce::String::fromUTF8 ("Beyonc\xc3\xa9");
     request.title = juce::String::fromUTF8 ("D\xc3\x89" "J\xc3\x80 VU");
     check (request.suggestedFilename (1) == juce::String::fromUTF8 ("beyonc\xc3\xa9-d\xc3\xa9" "j\xc3\xa0Vu-chunk1.wav"),

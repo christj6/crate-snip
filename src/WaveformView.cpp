@@ -230,6 +230,12 @@ void WaveformView::mouseDrag (const juce::MouseEvent& e)
     const auto frame = frameAtX (e.position.x);
     if (drag == Drag::newRegion)
     {
+        // A click that wobbles a pixel or two is still a click, not a sliver of a region.
+        constexpr int minimumDragPixels = 4;
+        if (draft.isEmpty() && e.getDistanceFromDragStartX() > -minimumDragPixels
+            && e.getDistanceFromDragStartX() < minimumDragPixels)
+            return;
+
         draft = { juce::jmin (frame, anchorFrame), juce::jmax (frame, anchorFrame) };
         repaint (plot());
     }
