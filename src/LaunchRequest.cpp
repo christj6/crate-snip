@@ -1,10 +1,79 @@
 #include "LaunchRequest.h"
 
+#ifndef NOMINMAX
+ #define NOMINMAX
+#endif
+#include <windows.h>
+
+#include <string>
+#include <string_view>
+#include <vector>
+
 namespace cratesnip
 {
 
 namespace
 {
+    juce::String mapCase (std::wstring_view text, DWORD flags)
+    {
+        const auto length = static_cast<int> (text.size());
+        const auto capacity = LCMapStringEx (LOCALE_NAME_INVARIANT, flags, text.data(), length,
+                                              nullptr, 0, nullptr, nullptr, 0);
+        if (capacity > 0)
+        {
+            std::wstring mapped (static_cast<size_t> (capacity), L'\0');
+            if (LCMapStringEx (LOCALE_NAME_INVARIANT, flags, text.data(), length, mapped.data(), capacity,
+                               nullptr, nullptr, 0) != 0)
+                return juce::String (mapped.data(), mapped.size());
+        }
+        return juce::String (text.data(), text.size());
+    }
+
+    juce::String toFilenameSegment (const juce::String& value, bool skipArtistArticle)
+    {
+        const std::wstring_view text (value.toWideCharPointer());
+        if (text.empty())
+            return {};
+
+        std::vector<WORD> types (text.size());
+        if (! GetStringTypeW (CT_CTYPE1, text.data(), static_cast<int> (text.size()), types.data()))
+            return {};
+
+        juce::StringArray words;
+        std::wstring word;
+        const auto addWord = [&]
+        {
+            if (! word.empty())
+            {
+                words.add (juce::String (word.data(), word.size()));
+                word.clear();
+            }
+        };
+        for (size_t i = 0; i < text.size(); ++i)
+        {
+            const auto character = text[i];
+            if (character == L'\'' || character == L'\u2019')
+                continue;
+            if ((types[i] & (C1_SPACE | C1_BLANK | C1_PUNCT | C1_CNTRL)) != 0)
+                addWord();
+            else
+                word.push_back (character);
+        }
+        addWord();
+
+        const auto start = skipArtistArticle && words.size() > 1 && words[0].equalsIgnoreCase ("the") ? 1 : 0;
+        juce::String result;
+        for (int i = start; i < words.size(); ++i)
+        {
+            const auto lower = mapCase (words[i].toWideCharPointer(), LCMAP_LOWERCASE);
+            if (result.isEmpty())
+                result = lower;
+            else
+                result << mapCase (lower.substring (0, 1).toWideCharPointer(), LCMAP_UPPERCASE) << lower.substring (1);
+        }
+        return result;
+    }
+
     juce::String cleanTag (const juce::String& value)
     {
         const auto trimmed = value.trim();
@@ -27,13 +96,22 @@ namespace
     }
 } // namespace
 
-juce::String LaunchRequest::suggestedBaseName() const
+juce::String LaunchRequest::suggestedFilename (unsigned chunkNumber) const
 {
-    const auto name = artist.isNotEmpty() && title.isNotEmpty()
-                          ? artist + " - " + title
-                          : file.getFileNameWithoutExtension();
+    const auto suffix = "-chunk" + juce::String (chunkNumber);
+    const auto limit = 128 - suffix.length();
+    const auto artistPart = juce::File::createLegalFileName (toFilenameSegment (artist, true));
+    const auto titlePart = juce::File::createLegalFileName (toFilenameSegment (title, false));
 
-    return juce::File::createLegalFileName (name).trim();
+    if (artistPart.isNotEmpty() && titlePart.isNotEmpty())
+    {
+        const auto artistLength = juce::jmin (artistPart.length(), juce::jmax (limit / 2, limit - 1 - titlePart.length()));
+        return artistPart.substring (0, artistLength) + "-"
+               + titlePart.substring (0, limit - artistLength - 1) + suffix + ".wav";
+    }
+
+    const auto fallback = juce::File::createLegalFileName (toFilenameSegment (file.getFileNameWithoutExtension(), false));
+    return (fallback.isEmpty() ? juce::String ("sample") : fallback.substring (0, limit)) + suffix + ".wav";
 }
 
 LaunchRequest LaunchRequest::parse (const juce::StringArray& args)

@@ -25,10 +25,8 @@ struct LaunchRequest
     /** Anything that couldn't be understood, to show to the user rather than silently drop. */
     juce::StringArray problems;
 
-    /** The name a cut would get before any numbering: "Artist - Title", or the file's own name
-        when either tag is missing. Characters Windows doesn't allow in file names are removed.
-    */
-    juce::String suggestedBaseName() const;
+    /** Builds a WAV filename such as artist-songTitle-chunk1.wav. Uses the source filename if a tag is missing. */
+    juce::String suggestedFilename (unsigned chunkNumber) const;
 
     static LaunchRequest parse (const juce::StringArray& args);
 };

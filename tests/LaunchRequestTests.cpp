@@ -25,15 +25,15 @@ void testFullRequest()
     check (r.artist == "Can" && r.title == "Vitamin C", "full: tags");
     check (r.positionSeconds.has_value() && std::abs (*r.positionSeconds - 83.456) < 1.0e-9, "full: position");
     check (r.problems.isEmpty(), "full: no problems");
-    check (r.suggestedBaseName() == "Can - Vitamin C", "full: base name");
+    check (r.suggestedFilename (1) == "can-vitaminC-chunk1.wav", "full: suggested filename");
 }
 
 void testMissingTagsFallBackToFileName()
 {
-    const auto r = LaunchRequest::parse ({ "C:\\Music\\track07.mp3", "--artist", "?", "--title", "" });
+    const auto r = LaunchRequest::parse ({ "C:\\Music\\Track 07.mp3", "--artist", "?", "--title", "" });
 
     check (r.artist.isEmpty(), "missing: '?' artist is empty");
-    check (r.suggestedBaseName() == "track07", "missing: falls back to file name");
+    check (r.suggestedFilename (3) == "track07-chunk3.wav", "missing: falls back to the source filename");
 }
 
 void testPositionThatIsNotANumber()
@@ -52,10 +52,34 @@ void testPositionThatIsNotANumber()
 void testIllegalFileNameCharacters()
 {
     const auto r = LaunchRequest::parse ({ "C:\\x.wav", "--artist", "AC/DC", "--title", "What? \"Why\"" });
-    const auto name = r.suggestedBaseName();
+    check (r.suggestedFilename (1) == "acDc-whatWhy-chunk1.wav", "punctuation separates words");
+}
 
-    check (! name.containsAnyOf ("\\/:*?\"<>|"), "illegal characters removed");
-    check (name.startsWith ("AC"), "illegal characters: rest of the name kept");
+void testCamelCaseFilenames()
+{
+    LaunchRequest request;
+    request.artist = "The Beatles";
+    request.title = "Tomorrow Never Knows";
+    check (request.suggestedFilename (1) == "beatles-tomorrowNeverKnows-chunk1.wav", "Beatles example");
+    check (request.suggestedFilename (2) == "beatles-tomorrowNeverKnows-chunk2.wav", "second chunk");
+
+    request.artist = "tHE   Heavy";
+    request.title = "The Big Bad Wolf";
+    check (request.suggestedFilename (10) == "heavy-theBigBadWolf-chunk10.wav", "leading artist article is case-insensitive");
+
+    request.artist = "Cage the Elephant";
+    request.title = "Ain't No Rest";
+    check (request.suggestedFilename (1) == "cageTheElephant-aintNoRest-chunk1.wav", "interior artist article and apostrophe");
+
+    request.artist = juce::String::fromUTF8 ("Beyonc\xc3\xa9");
+    request.title = juce::String::fromUTF8 ("D\xc3\x89" "J\xc3\x80 VU");
+    check (request.suggestedFilename (1) == juce::String::fromUTF8 ("beyonc\xc3\xa9-d\xc3\xa9" "j\xc3\xa0Vu-chunk1.wav"),
+           "Unicode tags and casing");
+
+    request.artist = juce::String::repeatedString ("Artist ", 40);
+    request.title = "Song Name";
+    const auto longName = request.suggestedFilename (100);
+    check (longName.length() <= 132 && longName.endsWith ("-songName-chunk100.wav"), "long names preserve both tags and chunk suffix");
 }
 
 void testOddArguments()
@@ -75,6 +99,7 @@ int main()
     testMissingTagsFallBackToFileName();
     testPositionThatIsNotANumber();
     testIllegalFileNameCharacters();
+    testCamelCaseFilenames();
     testOddArguments();
     failures += runRegionAudioTests();
 

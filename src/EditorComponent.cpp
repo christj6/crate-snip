@@ -205,12 +205,7 @@ void EditorComponent::deleteKeyPressed (int row)
 
 void EditorComponent::addRegion (FrameRange range)
 {
-    auto stem = request.suggestedBaseName();
-    if (stem.isEmpty())
-        stem = "Sample";
-
-    const auto suffix = " - " + juce::String (nextRegionNumber++).paddedLeft ('0', 2);
-    const auto name = stem.substring (0, 128 - suffix.length()).trimEnd() + suffix + ".wav";
+    const auto name = request.suggestedFilename (nextRegionNumber++);
     regions.push_back ({ range, name, name });
     regionList.updateContent();
     selectRegion (getNumRows() - 1);
