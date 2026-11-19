@@ -17,9 +17,7 @@ CrateSnip is a planned Windows companion app for foobar2000 that turns parts of 
 
 ## Implementation
 
-The first version will be a standalone JUCE app launched through foobar2000’s Run Services component. Preview and export will share the same sample-frame boundaries. Keeping the audio reader separate from the editor leaves room to use foobar2000’s decoders later. [Run Services](https://www.foobar2000.org/components/view/foo_run) · [JUCE](https://juce.com/)
-
-An early integration check will determine whether the editor can open at the current playhead and pause foobar2000 for preview. A small native launcher can handle that handoff if needed.
+CrateSnip is a standalone JUCE app with a small native foobar2000 launcher. The launcher reads the selected track and passes the playhead when that track is playing. Preview and export will share the same sample-frame boundaries. Keeping the audio reader separate from the editor leaves room to use foobar2000’s decoders later. [foobar2000 SDK](https://www.foobar2000.org/SDK) · [JUCE](https://juce.com/)
 
 ## Current state: handoff check
 
@@ -43,22 +41,22 @@ build.cmd
 
 `build.cmd` configures `build\` on first use and builds Debug and Release. The app is `build\CrateSnip_artefacts\Release\CrateSnip.exe`. To build the tests as well, configure with `cmake -S . -B build -DCRATE_SNIP_BUILD_TESTS=ON` and run `build\CrateSnipTests_artefacts\Release\CrateSnipTests.exe`.
 
+## Building the foobar2000 launcher
+
+Build the Release app, then download and extract the [foobar2000 SDK](https://www.foobar2000.org/SDK). Run the following command from the repo root in PowerShell.
+
+```powershell
+.\launcher\build.ps1 -SdkDirectory 'C:\path\to\extracted-sdk'
+```
+
+The script creates `build\foobar2000\foo_cratesnip.fb2k-component` with the x64 launcher and the Release app.
+
 ## Adding it to foobar2000
 
-1. Install [Run Services](https://www.foobar2000.org/components/view/foo_run) (version 0.4.5 has a 64-bit build for foobar2000 v2) and restart foobar2000.
-2. Open **Preferences → Tools → Run services** and add a service named `Cut samples…` with this path, replacing `<crate-snip>` with the folder you cloned into:
+1. In 64-bit foobar2000 v2, open **Preferences → Components → Install…** and select `foo_cratesnip.fb2k-component`.
+2. Apply the change and restart foobar2000.
+3. Right-click one local track and choose **Cut samples…** from foobar2000’s context menu.
 
-   ```
-   "<crate-snip>\build\CrateSnip_artefacts\Release\CrateSnip.exe" "%path%" --artist "[%artist%]" --title "[%title%]" --position "[%playback_time_seconds%]"
-   ```
+When the selected track is playing, the **Position** line and orange waveform marker show where it was when you invoked the command. Selecting a different track or opening a track while playback is stopped leaves the position empty.
 
-   The square brackets make a missing tag empty instead of `?`.
-3. Right-click a track and choose the service from the **Run service** submenu.
-
-## What the handoff check needs to answer
-
-- [ ] Right-clicking the **playing** track: does the position arrive, and does the orange line sit where you heard it? Try a WAV or FLAC and an MP3: MP3 decoders can disagree by a few dozen milliseconds at the start.
-- [ ] Right-clicking a track that **isn't playing**: is the position empty, or the playing track's position?
-- [ ] Tags with quotes or unusual characters (`"`, `?`, `/`, accented letters): do the raw arguments match the tags?
-- [ ] Do **Pause** and **Resume** control the running foobar2000?
-- [ ] Which of your library's formats fail to decode?
+If you previously set up CrateSnip through **Run service → Cut samples…**, use the new **Cut samples…** item in the main context menu. The old Run Services action launched CrateSnip with an empty playhead during playback.
