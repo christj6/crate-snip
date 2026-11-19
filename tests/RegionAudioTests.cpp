@@ -58,14 +58,39 @@ int runRegionAudioTests()
     writer.reset();
 
     const cratesnip::FrameRange region { 2, 7 };
-    auto section = cratesnip::makeRegionReader (openWav (source.getFile()), region);
-    check (section != nullptr && section->lengthInSamples == 5, "preview range length");
-    if (section == nullptr)
+    auto preview = cratesnip::makePreviewSource (openWav (source.getFile()), region, false);
+    check (preview != nullptr && preview->getTotalLength() == 5, "preview range length");
+    if (preview == nullptr)
         return failures;
 
-    juce::AudioFormatReaderSource preview (section.release(), true);
     juce::AudioBuffer<float> audition (2, 8);
-    preview.getNextAudioBlock ({ &audition, 0, audition.getNumSamples() });
+    preview->getNextAudioBlock ({ &audition, 0, audition.getNumSamples() });
+
+    auto loop = cratesnip::makePreviewSource (openWav (source.getFile()), region, true);
+    check (loop != nullptr && loop->isLooping(), "looping preview enabled");
+    if (loop != nullptr)
+    {
+        juce::AudioBuffer<float> repeated (2, 13);
+        loop->getNextAudioBlock ({ &repeated, 0, 6 });
+        loop->getNextAudioBlock ({ &repeated, 6, 7 });
+        for (int channel = 0; channel < repeated.getNumChannels(); ++channel)
+            for (int frame = 0; frame < repeated.getNumSamples(); ++frame)
+                check (near (fixture.getSample (channel, 2 + frame % 5), repeated.getSample (channel, frame)),
+                       "loop wraps at selected frames across audio blocks");
+        check (loop->getNextReadPosition() == 3, "loop position remains within the region");
+    }
+
+    auto resizedLoop = cratesnip::makePreviewSource (openWav (source.getFile()), { 4, 7 }, true);
+    check (resizedLoop != nullptr, "preview accepts adjusted loop bounds");
+    if (resizedLoop != nullptr)
+    {
+        juce::AudioBuffer<float> repeated (2, 7);
+        resizedLoop->setNextReadPosition (1);
+        resizedLoop->getNextAudioBlock ({ &repeated, 0, repeated.getNumSamples() });
+        for (int frame = 0; frame < repeated.getNumSamples(); ++frame)
+            check (near (fixture.getSample (0, 4 + (frame + 1) % 3), repeated.getSample (0, frame)),
+                   "updated loop repeats only within the new bounds");
+    }
 
     juce::TemporaryFile occupied (".wav");
     check (occupied.getFile().replaceWithText ("existing file"), "write collision fixture");

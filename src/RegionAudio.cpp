@@ -21,6 +21,19 @@ std::unique_ptr<juce::AudioFormatReader> makeRegionReader (std::unique_ptr<juce:
     return section;
 }
 
+std::unique_ptr<juce::AudioFormatReaderSource> makePreviewSource (std::unique_ptr<juce::AudioFormatReader> reader,
+                                                                  FrameRange region, bool looping)
+{
+    auto section = makeRegionReader (std::move (reader), region);
+    if (section == nullptr)
+        return {};
+
+    auto preview = std::make_unique<juce::AudioFormatReaderSource> (section.get(), true);
+    section.release();
+    preview->setLooping (looping);
+    return preview;
+}
+
 juce::String regionFilename (const Region& region)
 {
     auto name = region.name.trim();

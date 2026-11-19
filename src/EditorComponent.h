@@ -35,7 +35,9 @@ private:
     void updateSelectionInfo();
     void updateControls();
     void togglePreview();
+    void startPreview();
     void stopPreview();
+    juce::int64 currentPreviewFrame() const;
     void exportAll();
     void chooseFolder (bool exportAfterChoosing);
     void refreshFolder();
@@ -57,6 +59,7 @@ private:
     juce::AudioTransportSource transport;
     juce::AudioSourcePlayer player;
     FrameRange previewRange;
+    double previewStartedAtMs = 0;
 
     std::atomic_bool cancelExport { false };
     juce::ThreadPool exportThread { 1 };
@@ -74,6 +77,7 @@ private:
     juce::TextButton remove { "Remove region" };
     juce::TextButton zoomIn { "Zoom in" }, zoomOut { "Zoom out" }, fit { "Fit track" }, playhead { "Playhead" };
     juce::TextButton preview { "Preview" }, exportWav { "Export All" }, folderButton { "Export folder..." };
+    juce::ToggleButton loopPreview { "Loop preview" };
     juce::TextButton pauseFoobar { "Pause foobar2000" }, resumeFoobar { "Resume foobar2000" };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (EditorComponent)

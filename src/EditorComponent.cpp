@@ -45,7 +45,7 @@ EditorComponent::EditorComponent (LaunchRequest launchRequest)
 {
     juce::Component* const components[] { &waveform, &trackTitle, &trackInfo, &selectionInfo, &folderInfo,
                                           &status, &zoomIn, &zoomOut, &fit, &playhead, &preview,
-                                          &exportWav, &folderButton, &pauseFoobar, &resumeFoobar,
+                                          &loopPreview, &exportWav, &folderButton, &pauseFoobar, &resumeFoobar,
                                           &regionsTitle, &regionList, &filenameLabel, &filename, &remove };
     for (auto* component : components)
         addAndMakeVisible (component);
@@ -78,6 +78,11 @@ EditorComponent::EditorComponent (LaunchRequest launchRequest)
     fit.onClick = [this] { waveform.fitTrack(); };
     playhead.onClick = [this] { waveform.showPlayhead(); };
     preview.onClick = [this] { togglePreview(); };
+    loopPreview.onClick = [this]
+    {
+        if (transport.isPlaying())
+            startPreview();
+    };
     exportWav.onClick = [this] { exportAll(); };
     folderButton.onClick = [this] { chooseFolder (false); };
     waveform.onRegionCreated = [this] (FrameRange range) { addRegion (range); };
@@ -236,7 +241,8 @@ void EditorComponent::resizeRegion (int index, FrameRange range)
 {
     if (auto* region = getRegion (index); region != nullptr && region->frames != range)
     {
-        stopPreview();
+        if (index == activeRegion && ! loopPreview.getToggleState())
+            stopPreview();
         region->frames = range;
         waveform.repaint();
         regionList.repaintRow (index);
@@ -281,6 +287,7 @@ void EditorComponent::updateControls()
     fit.setEnabled (waveform.hasTrack());
     playhead.setEnabled (waveform.hasPlayhead());
     preview.setEnabled (hasSelection);
+    loopPreview.setEnabled (waveform.hasTrack());
     preview.setButtonText (previewSource == nullptr ? "Preview" : "Stop preview");
     filename.setEnabled (hasSelection);
     remove.setEnabled (hasSelection);
@@ -291,20 +298,24 @@ void EditorComponent::updateControls()
 void EditorComponent::togglePreview()
 {
     if (previewSource != nullptr)
-    {
         stopPreview();
-        return;
-    }
+    else
+        startPreview();
+}
 
+void EditorComponent::startPreview()
+{
     const auto* active = getRegion (activeRegion);
     if (active == nullptr)
         return;
-    previewRange = active->frames;
 
-    auto reader = makeRegionReader (std::unique_ptr<juce::AudioFormatReader> (formats.createReaderFor (request.file)),
-                                    previewRange);
-    if (reader == nullptr)
+    const auto bounds = active->frames;
+    const auto currentFrame = previewSource != nullptr ? currentPreviewFrame() : bounds.getStart();
+    auto reader = std::unique_ptr<juce::AudioFormatReader> (formats.createReaderFor (request.file));
+    auto nextSource = makePreviewSource (std::move (reader), bounds, loopPreview.getToggleState());
+    if (nextSource == nullptr)
     {
+        stopPreview();
         setStatus ("Could not read the selected region.");
         return;
     }
@@ -314,6 +325,7 @@ void EditorComponent::togglePreview()
         const auto error = deviceManager.initialiseWithDefaultDevices (0, 2);
         if (error.isNotEmpty() || deviceManager.getCurrentAudioDevice() == nullptr)
         {
+            stopPreview();
             setStatus (error.isNotEmpty() ? error : juce::String ("No audio output device is available."));
             return;
         }
@@ -324,16 +336,23 @@ void EditorComponent::togglePreview()
 
     if (! readAhead.isThreadRunning() && ! readAhead.startThread())
     {
+        stopPreview();
         setStatus ("Could not start the preview reader.");
         return;
     }
 
-    const auto readerRate = reader->sampleRate;
-    previewSource = std::make_unique<juce::AudioFormatReaderSource> (reader.get(), true);
-    reader.release();
-    transport.setSource (previewSource.get(), 32768, &readAhead, readerRate);
+    const auto readerRate = nextSource->getAudioFormatReader()->sampleRate;
+    transport.setSource (nextSource.get(), 32768, &readAhead, readerRate);
+    previewSource = std::move (nextSource);
+    previewRange = bounds;
+
+    const auto startFrame = bounds.contains (currentFrame) ? currentFrame : bounds.getStart();
+    if (startFrame > bounds.getStart())
+        transport.setPosition (static_cast<double> (startFrame - bounds.getStart()) / readerRate);
+
     transport.start();
-    waveform.setPreviewFrame (previewRange.getStart());
+    previewStartedAtMs = juce::Time::getMillisecondCounterHiRes();
+    waveform.setPreviewFrame (startFrame);
     startTimerHz (30);
     updateControls();
 }
@@ -359,8 +378,24 @@ void EditorComponent::timerCallback()
         return;
     }
 
-    const auto elapsed = static_cast<juce::int64> (std::llround (transport.getCurrentPosition() * sourceRate));
-    waveform.setPreviewFrame (juce::jmin (previewRange.getEnd(), previewRange.getStart() + elapsed));
+    // Mouse drags can update the region faster than the buffered source can be rebuilt.
+    constexpr auto rangeUpdateIntervalMs = 120.0;
+    const auto* active = getRegion (activeRegion);
+    if (loopPreview.getToggleState() && active != nullptr && active->frames != previewRange
+        && juce::Time::getMillisecondCounterHiRes() - previewStartedAtMs >= rangeUpdateIntervalMs)
+    {
+        startPreview();
+        return;
+    }
+
+    waveform.setPreviewFrame (currentPreviewFrame());
+}
+
+juce::int64 EditorComponent::currentPreviewFrame() const
+{
+    const auto rate = previewSource->getAudioFormatReader()->sampleRate;
+    const auto elapsed = static_cast<juce::int64> (std::llround (transport.getCurrentPosition() * rate));
+    return juce::jlimit (previewRange.getStart(), previewRange.getEnd() - 1, previewRange.getStart() + elapsed);
 }
 
 void EditorComponent::refreshFolder()
@@ -495,16 +530,22 @@ void EditorComponent::resized()
     area.removeFromTop (10);
 
     status.setBounds (area.removeFromBottom (24));
-    folderInfo.setBounds (area.removeFromBottom (24));
+    auto footer = area.removeFromBottom (28);
+    resumeFoobar.setBounds (footer.removeFromRight (130));
+    footer.removeFromRight (8);
+    pauseFoobar.setBounds (footer.removeFromRight (130));
+    footer.removeFromRight (8);
+    folderInfo.setBounds (footer);
+    area.removeFromBottom (4);
+
     auto actions = area.removeFromBottom (36);
-    for (auto* button : { &preview, &exportWav, &folderButton })
-    {
-        button->setBounds (actions.removeFromLeft (116));
-        actions.removeFromLeft (8);
-    }
-    resumeFoobar.setBounds (actions.removeFromRight (130));
-    actions.removeFromRight (8);
-    pauseFoobar.setBounds (actions.removeFromRight (130));
+    preview.setBounds (actions.removeFromLeft (116));
+    actions.removeFromLeft (8);
+    loopPreview.setBounds (actions.removeFromLeft (132));
+    actions.removeFromLeft (8);
+    exportWav.setBounds (actions.removeFromLeft (116));
+    actions.removeFromLeft (8);
+    folderButton.setBounds (actions.removeFromLeft (116));
     area.removeFromBottom (10);
 
     auto side = area.removeFromRight (260);

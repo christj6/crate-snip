@@ -14,6 +14,9 @@ using FrameRange = juce::Range<juce::int64>;
 std::unique_ptr<juce::AudioFormatReader> makeRegionReader (std::unique_ptr<juce::AudioFormatReader>,
                                                          FrameRange);
 
+std::unique_ptr<juce::AudioFormatReaderSource> makePreviewSource (std::unique_ptr<juce::AudioFormatReader>,
+                                                                  FrameRange, bool looping);
+
 struct Region
 {
     FrameRange frames;
