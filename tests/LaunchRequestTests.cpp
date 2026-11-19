@@ -97,8 +97,18 @@ void testOddArguments()
 
 int runRegionAudioTests();
 
-int main()
+int probeAudioFormats (const juce::StringArray& files);
+
+int wmain (int argc, wchar_t* argv[])
 {
+    if (argc > 1 && juce::String (argv[1]) == "--probe-formats")
+    {
+        juce::StringArray paths;
+        for (int i = 2; i < argc; ++i)
+            paths.add (juce::String (argv[i]));
+        return probeAudioFormats (paths);
+    }
+
     testFullRequest();
     testMissingTagsFallBackToFileName();
     testPositionThatIsNotANumber();

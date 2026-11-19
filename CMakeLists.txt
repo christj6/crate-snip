@@ -54,6 +54,7 @@ if(CRATE_SNIP_BUILD_TESTS)
         PRIVATE
             src/LaunchRequest.cpp
             src/RegionAudio.cpp
+            tests/AudioFormatProbe.cpp
             tests/LaunchRequestTests.cpp
             tests/RegionAudioTests.cpp)
 
