@@ -67,6 +67,8 @@ void testOddArguments()
 }
 } // namespace
 
+int runRegionAudioTests();
+
 int main()
 {
     testFullRequest();
@@ -74,7 +76,8 @@ int main()
     testPositionThatIsNotANumber();
     testIllegalFileNameCharacters();
     testOddArguments();
+    failures += runRegionAudioTests();
 
-    std::cout << (failures == 0 ? "All LaunchRequest tests passed\n" : "LaunchRequest tests FAILED\n");
+    std::cout << (failures == 0 ? "All CrateSnip tests passed\n" : "CrateSnip tests FAILED\n");
     return failures == 0 ? 0 : 1;
 }

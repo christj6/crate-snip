@@ -1,4 +1,4 @@
-#include "HandoffComponent.h"
+#include "EditorComponent.h"
 #include "LaunchRequest.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
@@ -15,8 +15,9 @@ public:
                           allButtons)
     {
         setUsingNativeTitleBar (true);
-        setContentOwned (new HandoffComponent (args, LaunchRequest::parse (args)), true);
+        setContentOwned (new EditorComponent (LaunchRequest::parse (args)), true);
         setResizable (true, true);
+        setResizeLimits (700, 420, 4096, 2160);
         centreWithSize (getWidth(), getHeight());
         setVisible (true);
     }

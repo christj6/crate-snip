@@ -22,11 +22,15 @@ target_sources(CrateSnip
     PRIVATE
         src/FoobarRemote.cpp
         src/FoobarRemote.h
-        src/HandoffComponent.cpp
-        src/HandoffComponent.h
+        src/EditorComponent.cpp
+        src/EditorComponent.h
         src/LaunchRequest.cpp
         src/LaunchRequest.h
-        src/Main.cpp)
+        src/Main.cpp
+        src/RegionAudio.cpp
+        src/RegionAudio.h
+        src/WaveformView.cpp
+        src/WaveformView.h)
 
 target_compile_definitions(CrateSnip
     PRIVATE
@@ -49,7 +53,9 @@ if(CRATE_SNIP_BUILD_TESTS)
     target_sources(CrateSnipTests
         PRIVATE
             src/LaunchRequest.cpp
-            tests/LaunchRequestTests.cpp)
+            src/RegionAudio.cpp
+            tests/LaunchRequestTests.cpp
+            tests/RegionAudioTests.cpp)
 
     target_include_directories(CrateSnipTests PRIVATE src)
 
@@ -60,7 +66,7 @@ if(CRATE_SNIP_BUILD_TESTS)
 
     target_link_libraries(CrateSnipTests
         PRIVATE
-            juce::juce_core
+            juce::juce_audio_formats
         PUBLIC
             juce::juce_recommended_config_flags
             juce::juce_recommended_warning_flags)
