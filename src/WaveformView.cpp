@@ -22,6 +22,11 @@ WaveformView::WaveformView (juce::AudioFormatManager& formats, const std::vector
     scrollbar.addListener (this);
     scrollbar.setTitle ("Waveform position");
     addAndMakeVisible (scrollbar);
+    loadingIndicator.setTitle ("Opening track");
+    loadingIndicator.setTextToDisplay ("Opening track...");
+    loadingIndicator.setColour (juce::ProgressBar::backgroundColourId, juce::Colour (0xff25313c));
+    loadingIndicator.setColour (juce::ProgressBar::foregroundColourId, juce::Colour (0xff416d76));
+    addChildComponent (loadingIndicator);
     setTitle ("Track waveform");
     setWantsKeyboardFocus (true);
 }
@@ -32,17 +37,28 @@ WaveformView::~WaveformView()
     thumbnail.removeChangeListener (this);
 }
 
-void WaveformView::setTrack (const juce::File& file, juce::int64 frames, double rate,
-                            std::optional<double> playheadSeconds)
+void WaveformView::setLoading (bool loading)
 {
+    loadingIndicator.setVisible (loading);
+    repaint (plot());
+}
+
+void WaveformView::setTrack (std::unique_ptr<juce::AudioFormatReader> reader,
+                             std::optional<double> playheadSeconds)
+{
+    const auto frames = reader->lengthInSamples;
+    const auto rate = reader->sampleRate;
     totalFrames = frames;
     sampleRate = rate;
+    openError.clear();
     if (playheadSeconds && std::isfinite (*playheadSeconds) && *playheadSeconds >= 0
         && *playheadSeconds <= static_cast<double> (frames) / rate)
         playheadFrame = static_cast<juce::int64> (std::llround (*playheadSeconds * rate));
 
     scrollbar.setRangeLimits (0, static_cast<double> (frames), juce::dontSendNotification);
-    thumbnail.setSource (new juce::FileInputSource (file));
+    // The cache belongs to this view, which displays one track for its lifetime.
+    thumbnail.setReader (reader.release(), 0);
+    setLoading (false);
     if (hasPlayhead())
         showPlayhead();
     else
@@ -52,7 +68,7 @@ void WaveformView::setTrack (const juce::File& file, juce::int64 frames, double 
 void WaveformView::setOpenError (juce::String error)
 {
     openError = std::move (error);
-    repaint();
+    setLoading (false);
 }
 
 void WaveformView::zoom (double factor) { zoomAt (factor, 0.5); }
@@ -159,6 +175,9 @@ void WaveformView::paint (juce::Graphics& g)
     g.setColour (juce::Colour (0xff11161d));
     g.fillRect (area);
 
+    if (loadingIndicator.isVisible())
+        return;
+
     if (! hasTrack() || thumbnail.getTotalLength() <= 0)
     {
         g.setColour (juce::Colour (0xffa6b2c1));
@@ -239,6 +258,7 @@ void WaveformView::paint (juce::Graphics& g)
 void WaveformView::resized()
 {
     scrollbar.setBounds (getLocalBounds().removeFromBottom (16));
+    loadingIndicator.setBounds (plot().withSizeKeepingCentre (184, 30));
 }
 
 void WaveformView::mouseDown (const juce::MouseEvent& e)

@@ -15,11 +15,13 @@ public:
                           allButtons)
     {
         setUsingNativeTitleBar (true);
-        setContentOwned (new EditorComponent (LaunchRequest::parse (args)), true);
+        auto* editor = new EditorComponent (LaunchRequest::parse (args));
+        setContentOwned (editor, true);
         setResizable (true, true);
         setResizeLimits (700, 420, 4096, 2160);
         centreWithSize (getWidth(), getHeight());
         setVisible (true);
+        editor->startLoading();
     }
 
     void closeButtonPressed() override
@@ -30,7 +32,11 @@ public:
     void requestClose()
     {
         static_cast<EditorComponent*> (getContentComponent())->requestClose (
-            [] { juce::JUCEApplicationBase::quit(); });
+            [this]
+            {
+                setVisible (false);
+                juce::JUCEApplicationBase::quit();
+            });
     }
 
 private:

@@ -40,6 +40,18 @@ juce::String rangeText (FrameRange range, double sampleRate)
 
 } // namespace
 
+struct EditorComponent::StartupData
+{
+    void openTrack (const juce::File&);
+
+    std::optional<SourceVersion> version;
+    std::unique_ptr<juce::AudioFormatReader> reader;
+    juce::String error;
+    juce::File exportFolder;
+    bool exportFolderAvailable = false;
+    std::unique_ptr<FoobarRemote> foobar;
+};
+
 EditorComponent::EditorComponent (LaunchRequest launchRequest)
     : request (std::move (launchRequest))
 {
@@ -90,22 +102,20 @@ EditorComponent::EditorComponent (LaunchRequest launchRequest)
     waveform.onRegionResized = [this] (int index, FrameRange range) { resizeRegion (index, range); };
     pauseFoobar.onClick = [this]
     {
-        const auto error = foobar.pause();
+        const auto error = foobar->pause();
         setStatus (error.isEmpty() ? juce::String ("Pause sent to foobar2000.") : error);
     };
     resumeFoobar.onClick = [this]
     {
         stopPreview();
-        const auto error = foobar.resume();
+        const auto error = foobar->resume();
         setStatus (error.isEmpty() ? juce::String ("Play sent to foobar2000.") : error);
     };
 
-    const auto hasFoobar = foobar.getExecutable() != juce::File();
-    pauseFoobar.setEnabled (hasFoobar);
-    resumeFoobar.setEnabled (hasFoobar);
+    trackTitle.setText (request.title.isNotEmpty() ? request.title : request.file.getFileNameWithoutExtension(),
+                        juce::dontSendNotification);
     formats.registerBasicFormats();
-    openTrack();
-    refreshFolder();
+    waveform.setLoading (true);
     selectRegion (-1);
     setSize (1040, 620);
 }
@@ -114,8 +124,8 @@ EditorComponent::~EditorComponent()
 {
     regionList.setModel (nullptr);
     chooser.reset();
-    cancelExport.store (true);
-    exportThread.removeAllJobs (true, -1);
+    cancelFileJobs.store (true);
+    fileJobs.removeAllJobs (true, -1);
 
     stopTimer();
     deviceManager.removeAudioCallback (&player);
@@ -162,47 +172,88 @@ void EditorComponent::requestClose (std::function<void()> close)
 
             // Let the worker finish cancelling before quitting, without blocking the message thread.
             safe->closeAfterExport = std::move (close);
-            safe->cancelExport.store (true);
+            safe->cancelFileJobs.store (true);
             safe->setStatus ("Cancelling export before closing...");
             safe->setEnabled (false);
         }));
     closePrompt->getButton ("Keep editing")->grabKeyboardFocus();
 }
 
-void EditorComponent::openTrack()
+void EditorComponent::startLoading()
 {
-    trackTitle.setText (request.title.isNotEmpty() ? request.title : request.file.getFileNameWithoutExtension(),
-                        juce::dontSendNotification);
-
-    if (! request.file.existsAsFile())
+    fileJobs.addJob ([safe = juce::Component::SafePointer<EditorComponent> (this),
+                      file = request.file, cancelled = &cancelFileJobs]
     {
-        waveform.setOpenError (request.file == juce::File() ? "Open a track from foobar2000." : "File not found.");
+        StartupData data;
+        data.openTrack (file);
+        if (cancelled->load())
+            return;
+
+        data.exportFolder = loadExportFolder();
+        data.exportFolderAvailable = data.exportFolder != juce::File() && data.exportFolder.isDirectory();
+        if (cancelled->load())
+            return;
+
+        data.foobar = std::make_unique<FoobarRemote>();
+        juce::MessageManager::callAsync ([safe, data = std::move (data)] () mutable
+        {
+            if (safe != nullptr)
+                safe->finishLoading (std::move (data));
+        });
+    });
+}
+
+void EditorComponent::StartupData::openTrack (const juce::File& file)
+{
+    if (! file.existsAsFile())
+    {
+        error = file == juce::File() ? "Open a track from foobar2000." : "File not found.";
         return;
     }
 
-    const SourceFileAccess access (request.file);
-    const auto version = access.version();
+    const SourceFileAccess access (file);
+    version = access.version();
     if (! version)
     {
-        waveform.setOpenError (sourceUnavailable);
+        error = sourceUnavailable;
         return;
     }
 
-    auto reader = std::unique_ptr<juce::AudioFormatReader> (formats.createReaderFor (request.file));
-    if (reader == nullptr || reader->lengthInSamples <= 0 || reader->sampleRate <= 0
-        || ! std::isfinite (reader->sampleRate))
+    juce::AudioFormatManager trackFormats;
+    trackFormats.registerBasicFormats();
+    std::unique_ptr<juce::AudioFormatReader> opened (trackFormats.createReaderFor (file));
+    if (opened == nullptr || opened->lengthInSamples <= 0 || opened->sampleRate <= 0
+        || ! std::isfinite (opened->sampleRate))
     {
-        waveform.setOpenError ("Could not decode this audio file.");
+        error = "Could not decode this audio file.";
         return;
     }
 
-    if (! isSupportedChannelCount (reader->numChannels))
+    if (! isSupportedChannelCount (opened->numChannels))
     {
-        waveform.setOpenError (unsupportedChannelCount);
+        error = unsupportedChannelCount;
         return;
     }
 
-    sourceVersion = version;
+    reader = std::move (opened);
+}
+
+void EditorComponent::finishLoading (StartupData data)
+{
+    loading = false;
+    exportFolder = std::move (data.exportFolder);
+    showExportFolder (data.exportFolderAvailable);
+    foobar = std::move (data.foobar);
+
+    if (data.reader == nullptr)
+    {
+        waveform.setOpenError (std::move (data.error));
+        updateControls();
+        return;
+    }
+
+    sourceVersion = data.version;
+    const auto& reader = data.reader;
     sourceRate = reader->sampleRate;
     juce::String info;
     if (request.artist.isNotEmpty())
@@ -211,7 +262,9 @@ void EditorComponent::openTrack()
          << static_cast<int> (reader->numChannels) << " ch  |  "
          << formatTime (static_cast<double> (reader->lengthInSamples) / sourceRate);
     trackInfo.setText (info, juce::dontSendNotification);
-    waveform.setTrack (request.file, reader->lengthInSamples, sourceRate, request.positionSeconds);
+    waveform.setTrack (std::move (data.reader), request.positionSeconds);
+    updateSelectionInfo();
+    updateControls();
     if (! request.problems.isEmpty())
         setStatus (request.problems[0]);
 }
@@ -345,8 +398,11 @@ void EditorComponent::updateControls()
     preview.setButtonText (previewSource == nullptr ? "Preview" : "Stop preview");
     filename.setEnabled (hasSelection);
     remove.setEnabled (hasSelection);
-    folderButton.setEnabled (! choosing && ! exporting);
+    folderButton.setEnabled (! loading && ! choosing && ! exporting);
     exportWav.setEnabled (! regions.empty() && ! choosing && ! exporting);
+    const auto hasFoobar = foobar != nullptr && foobar->getExecutable() != juce::File();
+    pauseFoobar.setEnabled (hasFoobar);
+    resumeFoobar.setEnabled (hasFoobar);
 }
 
 void EditorComponent::togglePreview()
@@ -467,11 +523,16 @@ void EditorComponent::refreshFolder()
     if (! useSessionFolder)
         exportFolder = loadExportFolder();
 
+    showExportFolder (exportFolder != juce::File() && exportFolder.isDirectory());
+}
+
+void EditorComponent::showExportFolder (bool available)
+{
     juce::String description = "No export folder selected";
     if (exportFolder != juce::File())
     {
         description = "Export folder  " + exportFolder.getFullPathName();
-        if (! exportFolder.isDirectory())
+        if (! available)
             description += " (unavailable)";
         else if (useSessionFolder)
             description += " (this window)";
@@ -533,9 +594,9 @@ void EditorComponent::beginExport()
     exporting = true;
     updateControls();
     setStatus ("Exporting " + juce::String (getNumRows()) + (getNumRows() == 1 ? " region..." : " regions..."));
-    exportThread.addJob ([safe = juce::Component::SafePointer<EditorComponent> (this), source = request.file,
+    fileJobs.addJob ([safe = juce::Component::SafePointer<EditorComponent> (this), source = request.file,
                           version = *sourceVersion, cuts = regions, folder = exportFolder,
-                          cancelled = &cancelExport]() mutable
+                      cancelled = &cancelFileJobs]() mutable
     {
         auto results = exportRegions (source, version, cuts, folder, cancelled);
         juce::MessageManager::callAsync ([safe, cuts = std::move (cuts), results = std::move (results)]

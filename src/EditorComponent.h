@@ -15,6 +15,7 @@ public:
     explicit EditorComponent (LaunchRequest);
     ~EditorComponent() override;
 
+    void startLoading();
     void requestClose (std::function<void()>);
 
 private:
@@ -28,7 +29,8 @@ private:
     void selectedRowsChanged (int) override;
     void deleteKeyPressed (int) override;
 
-    void openTrack();
+    struct StartupData;
+    void finishLoading (StartupData);
     Region* getRegion (int);
     void addRegion (FrameRange);
     void selectRegion (int);
@@ -43,6 +45,7 @@ private:
     void exportAll();
     void chooseFolder (bool exportAfterChoosing);
     void refreshFolder();
+    void showExportFolder (bool available);
     void beginExport();
     void exportFinished (const std::vector<Region>&, const std::vector<ExportResult>&);
     void setStatus (const juce::String&);
@@ -65,8 +68,9 @@ private:
     FrameRange previewRange;
     double previewStartedAtMs = 0;
 
-    std::atomic_bool cancelExport { false };
-    juce::ThreadPool exportThread { 1 };
+    std::atomic_bool cancelFileJobs { false };
+    juce::ThreadPool fileJobs { 1 };
+    bool loading = true;
     std::unique_ptr<juce::FileChooser> chooser;
     bool choosing = false;
     bool exporting = false;
@@ -75,7 +79,7 @@ private:
     std::unique_ptr<juce::AlertWindow> closePrompt;
     std::function<void()> closeAfterExport;
 
-    FoobarRemote foobar;
+    std::unique_ptr<FoobarRemote> foobar;
     juce::Label trackTitle, trackInfo, selectionInfo, folderInfo, status;
     juce::Label regionsTitle, filenameLabel;
     juce::ListBox regionList { "Regions" };

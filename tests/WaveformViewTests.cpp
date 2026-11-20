@@ -1,6 +1,32 @@
 #include "WaveformView.h"
 
+#include <algorithm>
 #include <iostream>
+
+namespace
+{
+
+class SilentTrack final : public juce::AudioFormatReader
+{
+public:
+    SilentTrack() : AudioFormatReader (nullptr, "Test track")
+    {
+        sampleRate = 10000.0;
+        lengthInSamples = 100000;
+        numChannels = 1;
+    }
+
+    bool readSamples (int* const* channels, int numDestChannels, int offset, juce::int64, int frames) override
+    {
+        for (int channel = 0; channel < numDestChannels; ++channel)
+            if (auto* samples = channels[channel])
+                std::fill_n (samples + offset, frames, 0);
+
+        return true;
+    }
+};
+
+} // namespace
 
 int runWaveformViewTests()
 {
@@ -11,10 +37,7 @@ int runWaveformViewTests()
                                            { { 80000, 100000 }, {}, {} } };
     cratesnip::WaveformView waveform (formats, regions);
     waveform.setSize (400, 200);
-    const auto source = juce::File::getSpecialLocation (juce::File::tempDirectory)
-                            .getNonexistentChildFile ("CrateSnip-waveform-test", ".wav");
-    waveform.setTrack (source, 100000, 10000.0, std::nullopt);
-    waveform.setActiveRegion (0);
+
 
     int selected = 0;
     cratesnip::FrameRange created;
@@ -55,6 +78,27 @@ int runWaveformViewTests()
             std::cerr << "FAIL: " << label << '\n';
         }
     };
+
+    const juce::ProgressBar* indicator = nullptr;
+    for (auto* child : waveform.getChildren())
+        if (auto* progress = dynamic_cast<const juce::ProgressBar*> (child))
+            indicator = progress;
+
+    waveform.setLoading (true);
+    check (indicator != nullptr && indicator->isVisible() && ! waveform.hasTrack(),
+           "opening indicator is visible while the waveform is unavailable");
+    gesture (160.0f, 180.0f, 180.0f);
+    check (created.isEmpty(), "region creation waits for the track");
+
+    waveform.setOpenError ("File not found.");
+    check (indicator != nullptr && ! indicator->isVisible() && ! waveform.hasTrack(),
+           "an open error ends loading without enabling the waveform");
+
+    waveform.setLoading (true);
+    waveform.setTrack (std::make_unique<SilentTrack>(), std::nullopt);
+    waveform.setActiveRegion (0);
+    check (indicator != nullptr && ! indicator->isVisible() && waveform.hasTrack(),
+           "an opened reader replaces the loading indicator");
 
     gesture (203.0f, 223.0f, 223.0f);
     check (selected == 1 && regions[1].frames == cratesnip::FrameRange (55000, 70000) && created.isEmpty(),

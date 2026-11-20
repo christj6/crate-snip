@@ -19,7 +19,8 @@ public:
     WaveformView (juce::AudioFormatManager&, const std::vector<Region>&);
     ~WaveformView() override;
 
-    void setTrack (const juce::File&, juce::int64 frames, double rate, std::optional<double> playheadSeconds);
+    void setLoading (bool);
+    void setTrack (std::unique_ptr<juce::AudioFormatReader>, std::optional<double> playheadSeconds);
     void setOpenError (juce::String);
     void zoom (double factor);
     void fitTrack();
@@ -68,6 +69,8 @@ private:
     juce::AudioThumbnailCache cache { 1 };
     juce::AudioThumbnail thumbnail;
     juce::ScrollBar scrollbar { false };
+    double loadingProgress = -1.0;
+    juce::ProgressBar loadingIndicator { loadingProgress };
     juce::String openError;
     juce::int64 totalFrames = 0;
     double sampleRate = 0;
