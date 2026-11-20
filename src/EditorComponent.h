@@ -52,9 +52,11 @@ private:
     int activeRegion = -1;
     unsigned nextRegionNumber = 1;
     double sourceRate = 0;
+    std::optional<SourceVersion> sourceVersion;
 
     juce::AudioDeviceManager deviceManager;
     juce::TimeSliceThread readAhead { "CrateSnip preview" };
+    std::optional<SourceFileAccess> previewAccess;
     std::unique_ptr<juce::AudioFormatReaderSource> previewSource;
     juce::AudioTransportSource transport;
     juce::AudioSourcePlayer player;

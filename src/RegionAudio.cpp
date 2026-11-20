@@ -122,7 +122,40 @@ private:
     bool published = false;
 };
 
+juce::uint64 combineWords (DWORD high, DWORD low)
+{
+    return (static_cast<juce::uint64> (high) << 32) | low;
+}
+
 } // namespace
+
+SourceFileAccess::SourceFileAccess (const juce::File& file)
+{
+    const auto path = file.getFullPathName();
+    auto opened = CreateFileW (path.toWideCharPointer(), GENERIC_READ, FILE_SHARE_READ, nullptr,
+                               OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (opened != INVALID_HANDLE_VALUE)
+        handle.reset (opened);
+}
+
+void SourceFileAccess::CloseHandle::operator() (void* opened) const noexcept
+{
+    ::CloseHandle (opened);
+}
+
+std::optional<SourceVersion> SourceFileAccess::version() const
+{
+    BY_HANDLE_FILE_INFORMATION info {};
+    if (handle == nullptr || ! GetFileInformationByHandle (handle.get(), &info))
+        return std::nullopt;
+
+    FILE_BASIC_INFO basic {};
+    GetFileInformationByHandleEx (handle.get(), FileBasicInfo, &basic, sizeof (basic));
+    return SourceVersion { info.dwVolumeSerialNumber, combineWords (info.nFileIndexHigh, info.nFileIndexLow),
+                           combineWords (info.nFileSizeHigh, info.nFileSizeLow),
+                           combineWords (info.ftLastWriteTime.dwHighDateTime, info.ftLastWriteTime.dwLowDateTime),
+                           basic.ChangeTime.QuadPart };
+}
 
 std::unique_ptr<juce::AudioFormatReader> makeRegionReader (std::unique_ptr<juce::AudioFormatReader> reader,
                                                          FrameRange region)
@@ -240,9 +273,17 @@ ExportResult exportRegion (std::unique_ptr<juce::AudioFormatReader> reader, Fram
     return { {}, "Could not save the finished WAV. Try another filename or folder." };
 }
 
-std::vector<ExportResult> exportRegions (const juce::File& source, const std::vector<Region>& regions,
-                                         const juce::File& folder, const std::atomic_bool* cancelled)
+std::vector<ExportResult> exportRegions (const juce::File& source, SourceVersion expectedVersion,
+                                         const std::vector<Region>& regions, const juce::File& folder,
+                                         const std::atomic_bool* cancelled)
 {
+    if (regions.empty() || (cancelled != nullptr && cancelled->load()))
+        return {};
+
+    const SourceFileAccess access (source);
+    if (access.version() != expectedVersion)
+        return std::vector<ExportResult> (regions.size(), { {}, sourceUnavailable });
+
     juce::AudioFormatManager formats;
     formats.registerBasicFormats();
 

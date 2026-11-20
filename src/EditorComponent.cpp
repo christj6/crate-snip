@@ -136,6 +136,14 @@ void EditorComponent::openTrack()
         return;
     }
 
+    const SourceFileAccess access (request.file);
+    const auto version = access.version();
+    if (! version)
+    {
+        waveform.setOpenError (sourceUnavailable);
+        return;
+    }
+
     auto reader = std::unique_ptr<juce::AudioFormatReader> (formats.createReaderFor (request.file));
     if (reader == nullptr || reader->lengthInSamples <= 0 || reader->sampleRate <= 0
         || ! std::isfinite (reader->sampleRate))
@@ -150,6 +158,7 @@ void EditorComponent::openTrack()
         return;
     }
 
+    sourceVersion = version;
     sourceRate = reader->sampleRate;
     juce::String info;
     if (request.artist.isNotEmpty())
@@ -312,6 +321,14 @@ void EditorComponent::startPreview()
 
     const auto bounds = active->frames;
     const auto currentFrame = previewSource != nullptr ? currentPreviewFrame() : bounds.getStart();
+    SourceFileAccess access (request.file);
+    if (! sourceVersion || access.version() != sourceVersion)
+    {
+        stopPreview();
+        setStatus (sourceUnavailable);
+        return;
+    }
+
     auto reader = std::unique_ptr<juce::AudioFormatReader> (formats.createReaderFor (request.file));
     auto nextSource = makePreviewSource (std::move (reader), bounds, loopPreview.getToggleState());
     if (nextSource == nullptr)
@@ -345,6 +362,7 @@ void EditorComponent::startPreview()
     const auto readerRate = nextSource->getAudioFormatReader()->sampleRate;
     transport.setSource (nextSource.get(), 32768, &readAhead, readerRate);
     previewSource = std::move (nextSource);
+    previewAccess = std::move (access);
     previewRange = bounds;
 
     const auto startFrame = bounds.contains (currentFrame) ? currentFrame : bounds.getStart();
@@ -367,6 +385,7 @@ void EditorComponent::stopPreview()
     transport.stop();
     transport.setSource (nullptr);
     previewSource.reset();
+    previewAccess.reset();
     waveform.setPreviewFrame (std::nullopt);
     updateControls();
 }
@@ -464,16 +483,17 @@ void EditorComponent::chooseFolder (bool exportAfterChoosing)
 
 void EditorComponent::beginExport()
 {
-    if (regions.empty())
+    if (regions.empty() || ! sourceVersion)
         return;
 
     exporting = true;
     updateControls();
     setStatus ("Exporting " + juce::String (getNumRows()) + (getNumRows() == 1 ? " region..." : " regions..."));
     exportThread.addJob ([safe = juce::Component::SafePointer<EditorComponent> (this), source = request.file,
-                          cuts = regions, folder = exportFolder, cancelled = &cancelExport]() mutable
+                          version = *sourceVersion, cuts = regions, folder = exportFolder,
+                          cancelled = &cancelExport]() mutable
     {
-        auto results = exportRegions (source, cuts, folder, cancelled);
+        auto results = exportRegions (source, version, cuts, folder, cancelled);
         juce::MessageManager::callAsync ([safe, cuts = std::move (cuts), results = std::move (results)]
         {
             if (safe != nullptr)

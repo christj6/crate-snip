@@ -1,5 +1,6 @@
 #include "RegionAudio.h"
 
+#include <algorithm>
 #include <cmath>
 #include <iostream>
 
@@ -167,7 +168,12 @@ int runRegionAudioTests()
         { { 0, 20 }, "Artist - Title - 02.wav", "Invalid range" },
         { { 7, 12 }, "Artist - Title - 03.wav", "Shared.wav" }
     };
-    const auto batch = cratesnip::exportRegions (source.getFile(), cuts, folder);
+    const auto version = cratesnip::SourceFileAccess (source.getFile()).version();
+    check (version.has_value(), "capture the open track version");
+    if (! version)
+        return failures;
+
+    const auto batch = cratesnip::exportRegions (source.getFile(), *version, cuts, folder);
     check (batch.size() == 3, "one result for each cut");
     if (batch.size() == 3)
     {
@@ -185,6 +191,21 @@ int runRegionAudioTests()
     for (const auto& item : batch)
         if (item.file.getParentDirectory() == folder)
             item.file.deleteFile();
+
+    juce::TemporaryFile renamedSource (".wav");
+    const auto replaced = source.getFile().moveFileTo (renamedSource.getFile())
+                       && renamedSource.getFile().copyFileTo (source.getFile());
+    check (replaced, "replace source fixture with an equal-length file");
+    if (replaced)
+    {
+        const auto stale = cratesnip::exportRegions (source.getFile(), *version, cuts, folder);
+        check (stale.size() == cuts.size()
+               && std::all_of (stale.begin(), stale.end(), [] (const auto& item)
+                              { return item.error == cratesnip::sourceUnavailable; }),
+               "a replacement source at the same path requires reopening");
+        check (folder.getNumberOfChildFiles (juce::File::findFiles) == 0,
+               "a replacement source produces no exports");
+    }
 
     folder.deleteFile();
 
