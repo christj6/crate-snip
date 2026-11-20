@@ -5,8 +5,124 @@
 #endif
 #include <windows.h>
 
+#include <cstring>
+#include <string>
+
 namespace cratesnip
 {
+
+namespace
+{
+
+class TemporaryExport
+{
+public:
+    explicit TemporaryExport (const juce::File& folder)
+    {
+        for (int attempt = 0; attempt < 16; ++attempt)
+        {
+            const auto path = folder.getChildFile (".cratesnip-" + juce::Uuid().toString() + ".tmp").getFullPathName();
+            handle = CreateFileW (path.toWideCharPointer(), GENERIC_WRITE | DELETE, 0, nullptr,
+                                  CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
+            if (isOpen())
+                break;
+
+            const auto error = GetLastError();
+            if (error != ERROR_ALREADY_EXISTS && error != ERROR_FILE_EXISTS)
+                break;
+        }
+    }
+
+    ~TemporaryExport()
+    {
+        if (! isOpen())
+            return;
+
+        if (! published)
+        {
+            FILE_DISPOSITION_INFO disposition { TRUE };
+            SetFileInformationByHandle (handle, FileDispositionInfo, &disposition, sizeof (disposition));
+        }
+        CloseHandle (handle);
+    }
+
+    TemporaryExport (const TemporaryExport&) = delete;
+    TemporaryExport& operator= (const TemporaryExport&) = delete;
+
+    bool isOpen() const { return handle != INVALID_HANDLE_VALUE; }
+
+    class Stream final : public juce::OutputStream
+    {
+    public:
+        explicit Stream (TemporaryExport& file) : destination (file) {}
+
+        bool write (const void* data, size_t bytes) override
+        {
+            DWORD written = 0;
+            if (bytes > MAXDWORD || ! WriteFile (destination.handle, data, static_cast<DWORD> (bytes), &written, nullptr)
+                || written != bytes)
+                destination.failed = true;
+            position += written;
+            return ! destination.failed;
+        }
+
+        void flush() override { destination.flush(); }
+
+        juce::int64 getPosition() override { return position; }
+
+        bool setPosition (juce::int64 newPosition) override
+        {
+            LARGE_INTEGER offset {};
+            offset.QuadPart = newPosition;
+            if (! SetFilePointerEx (destination.handle, offset, nullptr, FILE_BEGIN))
+            {
+                destination.failed = true;
+                return false;
+            }
+            position = newPosition;
+            return true;
+        }
+
+    private:
+        TemporaryExport& destination;
+        juce::int64 position = 0;
+    };
+
+    bool flush()
+    {
+        if (! FlushFileBuffers (handle))
+            failed = true;
+        return ! failed;
+    }
+
+    DWORD publish (const juce::File& target)
+    {
+        const std::wstring path (target.getFullPathName().toWideCharPointer());
+        const auto nameBytes = path.size() * sizeof (wchar_t);
+        const auto infoBytes = sizeof (FILE_RENAME_INFO) + nameBytes;
+        juce::HeapBlock<FILE_RENAME_INFO> info;
+        info.calloc (1, infoBytes);
+        if (info.get() == nullptr)
+            return ERROR_NOT_ENOUGH_MEMORY;
+
+        info->FileNameLength = static_cast<DWORD> (nameBytes);
+        std::memcpy (info->FileName, path.c_str(), nameBytes + sizeof (wchar_t));
+
+        // ReplaceIfExists stays false. The handle identifies the file we created.
+        if (! SetFileInformationByHandle (handle, FileRenameInfo, info.get(), static_cast<DWORD> (infoBytes)))
+            return GetLastError();
+
+        published = true;
+        return ERROR_SUCCESS;
+    }
+
+private:
+    HANDLE handle = INVALID_HANDLE_VALUE;
+    bool failed = false;
+    bool published = false;
+};
+
+} // namespace
 
 std::unique_ptr<juce::AudioFormatReader> makeRegionReader (std::unique_ptr<juce::AudioFormatReader> reader,
                                                          FrameRange region)
@@ -66,13 +182,11 @@ ExportResult exportRegion (std::unique_ptr<juce::AudioFormatReader> reader, Fram
 
     const auto requested = destination.withFileExtension (".wav");
     auto target = requested.getNonexistentSibling();
-    juce::TemporaryFile temporary (target);
-    auto fileStream = temporary.getFile().createOutputStream();
-    if (fileStream == nullptr)
+    TemporaryExport temporary (target.getParentDirectory());
+    if (! temporary.isOpen())
         return { {}, "Could not write to the selected folder." };
 
-    auto* const stream = fileStream.get();
-    std::unique_ptr<juce::OutputStream> output = std::move (fileStream);
+    std::unique_ptr<juce::OutputStream> output = std::make_unique<TemporaryExport::Stream> (temporary);
     auto options = juce::AudioFormatWriterOptions()
                        .withSampleRate (section->sampleRate)
                        .withNumChannels (static_cast<int> (section->numChannels))
@@ -101,23 +215,19 @@ ExportResult exportRegion (std::unique_ptr<juce::AudioFormatReader> reader, Fram
     if (! writer->flush())
         return { {}, "Could not finish writing the WAV." };
 
-    stream->flush();
-    if (stream->getStatus().failed())
-        return { {}, "Could not finish writing the WAV." };
-
     writer.reset();
+    if (! temporary.flush())
+        return { {}, "Could not finish writing the WAV." };
     if (cancelled != nullptr && cancelled->load())
         return { {}, "Export cancelled." };
 
     // Move within the destination folder without replacing an existing file.
-    const auto temporaryPath = temporary.getFile().getFullPathName();
     for (int attempt = 0; attempt < 16; ++attempt)
     {
-        const auto targetPath = target.getFullPathName();
-        if (MoveFileW (temporaryPath.toWideCharPointer(), targetPath.toWideCharPointer()))
+        const auto error = temporary.publish (target);
+        if (error == ERROR_SUCCESS)
             return { target, {} };
 
-        const auto error = GetLastError();
         if (error != ERROR_ALREADY_EXISTS && error != ERROR_FILE_EXISTS)
             break;
 
