@@ -159,6 +159,52 @@ std::optional<SourceVersion> SourceFileAccess::version() const
                            basic.ChangeTime.QuadPart };
 }
 
+juce::int64 SourceFileAccess::getTotalLength()
+{
+    LARGE_INTEGER length {};
+    return handle != nullptr && GetFileSizeEx (handle.get(), &length) ? length.QuadPart : -1;
+}
+
+juce::int64 SourceFileAccess::getPosition()
+{
+    return position;
+}
+
+bool SourceFileAccess::setPosition (juce::int64 offset)
+{
+    if (handle == nullptr || offset < 0)
+        return false;
+
+    if (offset != position)
+    {
+        LARGE_INTEGER target {};
+        target.QuadPart = offset;
+        if (! SetFilePointerEx (handle.get(), target, nullptr, FILE_BEGIN))
+            return false;
+        position = offset;
+    }
+
+    return true;
+}
+
+bool SourceFileAccess::isExhausted()
+{
+    return position >= getTotalLength();
+}
+
+int SourceFileAccess::read (void* buffer, int count)
+{
+    if (handle == nullptr || count <= 0)
+        return 0;
+
+    DWORD bytesRead = 0;
+    if (! ReadFile (handle.get(), buffer, static_cast<DWORD> (count), &bytesRead, nullptr))
+        return 0;
+
+    position += bytesRead;
+    return static_cast<int> (bytesRead);
+}
+
 std::unique_ptr<juce::AudioFormatReader> makeRegionReader (std::unique_ptr<juce::AudioFormatReader> reader,
                                                          FrameRange region)
 {
@@ -184,6 +230,39 @@ std::unique_ptr<juce::AudioFormatReaderSource> makePreviewSource (std::unique_pt
     section.release();
     preview->setLooping (looping);
     return preview;
+}
+
+VerifiedPreview openVerifiedPreview (juce::AudioFormatManager& formats, const juce::File& file,
+                                     const std::optional<SourceVersion>& expectedVersion,
+                                     FrameRange region, bool looping)
+{
+    if (! expectedVersion)
+        return { {}, sourceUnavailable };
+
+    auto stream = std::make_unique<SourceFileAccess> (file, SourceFileAccess::Sharing::allowWriters);
+    if (stream->version() != expectedVersion)
+        return { {}, sourceUnavailable };
+
+    // Match JUCE's file-based decoder order, using the verified stream for every attempt.
+    for (auto* format : formats)
+    {
+        if (! format->canHandleFile (file))
+            continue;
+
+        if (! stream->setPosition (0))
+            break;
+
+        std::unique_ptr<juce::AudioFormatReader> reader (format->createReaderFor (stream.get(), false));
+        if (reader != nullptr)
+        {
+            stream.release(); // The reader owns the verified handle from here.
+            if (auto preview = makePreviewSource (std::move (reader), region, looping))
+                return { std::move (preview), {} };
+            break;
+        }
+    }
+
+    return { {}, "Could not read the selected region." };
 }
 
 juce::String regionFilename (const Region& region)

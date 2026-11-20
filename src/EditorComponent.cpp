@@ -421,22 +421,12 @@ void EditorComponent::startPreview()
 
     const auto bounds = active->frames;
     const auto currentFrame = previewSource != nullptr ? currentPreviewFrame() : bounds.getStart();
-    // Checked again at each start, so the preview needn't hold the file: if it changes
-    // mid-preview, the next start reports it.
-    if (! sourceVersion
-        || SourceFileAccess (request.file, SourceFileAccess::Sharing::allowWriters).version() != sourceVersion)
-    {
-        stopPreview();
-        setStatus (sourceUnavailable);
-        return;
-    }
-
-    auto reader = std::unique_ptr<juce::AudioFormatReader> (formats.createReaderFor (request.file));
-    auto nextSource = makePreviewSource (std::move (reader), bounds, loopPreview.getToggleState());
+    auto [nextSource, previewError] = openVerifiedPreview (formats, request.file, sourceVersion,
+                                                           bounds, loopPreview.getToggleState());
     if (nextSource == nullptr)
     {
         stopPreview();
-        setStatus ("Could not read the selected region.");
+        setStatus (previewError);
         return;
     }
 

@@ -48,10 +48,9 @@ struct SourceVersion
     bool operator== (const SourceVersion&) const = default;
 };
 
-// Opens the source to read its version. blockWriters keeps the file unchanged while the handle
-// is open (used for exports); allowWriters lets foobar2000 edit tags, or anything else rename or
-// delete the file, meanwhile (used for preview, where a changed file only needs reopening).
-class SourceFileAccess
+// Opens the source to read its version or to decode from the same handle. Preview allows
+// tag edits, renames, and deletes. Export holds the source steady until it completes.
+class SourceFileAccess final : public juce::InputStream
 {
 public:
     enum class Sharing { blockWriters, allowWriters };
@@ -59,15 +58,31 @@ public:
     explicit SourceFileAccess (const juce::File&, Sharing = Sharing::blockWriters);
     std::optional<SourceVersion> version() const;
 
+    juce::int64 getTotalLength() override;
+    juce::int64 getPosition() override;
+    bool setPosition (juce::int64) override;
+    bool isExhausted() override;
+    int read (void*, int) override;
+
 private:
     struct CloseHandle
     {
         void operator() (void*) const noexcept;
     };
     std::unique_ptr<void, CloseHandle> handle;
+    juce::int64 position = 0;
 };
 
 inline constexpr auto sourceUnavailable = "The source changed or is unavailable. Reopen the track in CrateSnip.";
+
+struct VerifiedPreview
+{
+    std::unique_ptr<juce::AudioFormatReaderSource> source;
+    juce::String error;
+};
+
+VerifiedPreview openVerifiedPreview (juce::AudioFormatManager&, const juce::File&,
+                                     const std::optional<SourceVersion>& expectedVersion, FrameRange, bool looping);
 
 struct ExportResult
 {

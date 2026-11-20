@@ -45,13 +45,13 @@ juce::var probeFile (juce::AudioFormatManager& formats, const juce::File& file)
     if (! reader->read (&decoded, 0, count, start, true, true))
         return finish ("Decode failed");
 
-    auto preview = cratesnip::makePreviewSource (
-        std::unique_ptr<juce::AudioFormatReader> (formats.createReaderFor (file)), cut, false);
-    if (preview == nullptr)
-        return finish ("Preview failed");
+    const auto version = cratesnip::SourceFileAccess (file).version();
+    const auto preview = cratesnip::openVerifiedPreview (formats, file, version, cut, false);
+    if (preview.source == nullptr)
+        return finish ("Preview failed", preview.error);
 
     juce::AudioBuffer<float> audition (previewChannels, count);
-    preview->getNextAudioBlock ({ &audition, 0, count });
+    preview.source->getNextAudioBlock ({ &audition, 0, count });
 
     juce::TemporaryFile output (".wav");
     const auto saved = cratesnip::exportRegion (

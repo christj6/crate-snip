@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <iostream>
 
 namespace
@@ -13,6 +14,25 @@ std::unique_ptr<juce::AudioFormatReader> openWav (const juce::File& file)
     return stream != nullptr ? std::unique_ptr<juce::AudioFormatReader> (wav.createReaderFor (stream.release(), true))
                              : nullptr;
 }
+
+class ReplaceOnDecoderOpen final : public juce::WavAudioFormat
+{
+public:
+    explicit ReplaceOnDecoderOpen (std::function<void()> replace) : replaceFile (std::move (replace)) {}
+
+    bool canHandleFile (const juce::File& file) override
+    {
+        if (! juce::WavAudioFormat::canHandleFile (file))
+            return false;
+
+        // A path-based reader would open the replacement after this format check.
+        replaceFile();
+        return true;
+    }
+
+private:
+    std::function<void()> replaceFile;
+};
 
 bool near (float actual, float expected)
 {
@@ -174,15 +194,57 @@ int runRegionAudioTests()
         return failures;
 
     {
-        using Sharing = cratesnip::SourceFileAccess::Sharing;
-        const auto canWriteWhileOpen = [&] (Sharing sharing)
+        juce::AudioFormatManager formats;
+        formats.registerBasicFormats();
+        const auto verified = cratesnip::openVerifiedPreview (formats, source.getFile(), version, region, false);
+        juce::FileOutputStream tagWriter (source.getFile());
+        check (verified.source != nullptr && tagWriter.openedOk(),
+               "an actual preview lets another program open the file for writing");
+    }
+    {
+        const cratesnip::SourceFileAccess access (source.getFile());
+        juce::FileOutputStream tagWriter (source.getFile());
+        check (access.version() == version && ! tagWriter.openedOk(), "export access keeps the source unchanged");
+    }
+
+    {
+        juce::TemporaryFile previewFile (".wav");
+        juce::TemporaryFile renamedPreview (".wav");
+        juce::TemporaryFile replacementFile (".wav");
+        const auto replacement = cratesnip::exportRegion (openWav (source.getFile()), { 0, 1 },
+                                                          replacementFile.getFile());
+        const auto copied = source.getFile().copyFileTo (previewFile.getFile());
+        const auto previewVersion = cratesnip::SourceFileAccess (previewFile.getFile()).version();
+        check (replacement.error.isEmpty() && copied && previewVersion.has_value(),
+               "prepare original and shorter replacement preview fixtures");
+        if (replacement.error.isEmpty() && copied && previewVersion)
         {
-            const cratesnip::SourceFileAccess access (source.getFile(), sharing);
-            juce::FileOutputStream writer (source.getFile());
-            return access.version() == version && writer.openedOk();
-        };
-        check (canWriteWhileOpen (Sharing::allowWriters), "preview access lets other programs write the source");
-        check (! canWriteWhileOpen (Sharing::blockWriters), "export access keeps the source unchanged");
+            bool replacedDuringOpen = false;
+            juce::AudioFormatManager formats;
+            formats.registerFormat (new ReplaceOnDecoderOpen ([&]
+            {
+                replacedDuringOpen = previewFile.getFile().moveFileTo (renamedPreview.getFile())
+                                  && replacement.file.moveFileTo (previewFile.getFile());
+            }), true);
+
+            const auto original = cratesnip::openVerifiedPreview (formats, previewFile.getFile(),
+                                                                  previewVersion, region, false);
+            check (replacedDuringOpen, "replace the path after preview validation and before decoder reads");
+            check (original.source != nullptr && original.source->getTotalLength() == region.getLength(),
+                   "preview decodes the checked handle instead of reopening the replaced path");
+            if (original.source != nullptr)
+            {
+                juce::AudioBuffer<float> originalAudio (2, 5);
+                original.source->getNextAudioBlock ({ &originalAudio, 0, 5 });
+                check (near (originalAudio.getSample (0, 0), fixture.getSample (0, 2)),
+                       "the preview contains audio from the original file");
+            }
+
+            const auto stale = cratesnip::openVerifiedPreview (formats, previewFile.getFile(),
+                                                               previewVersion, region, false);
+            check (stale.source == nullptr && stale.error == cratesnip::sourceUnavailable,
+                   "starting another preview detects the replacement");
+        }
     }
 
     const auto batch = cratesnip::exportRegions (source.getFile(), *version, cuts, folder);
