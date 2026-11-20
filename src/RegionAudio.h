@@ -11,6 +11,16 @@ namespace cratesnip
 // The start frame is included and the end frame is excluded.
 using FrameRange = juce::Range<juce::int64>;
 
+// JUCE's export helper leaves one entry in its 128-slot table for a null terminator.
+inline constexpr unsigned maxSupportedChannels = 127;
+
+constexpr bool isSupportedChannelCount (unsigned channels)
+{
+    return channels > 0 && channels <= maxSupportedChannels;
+}
+
+inline constexpr auto unsupportedChannelCount = "CrateSnip supports audio with 1 to 127 channels.";
+
 std::unique_ptr<juce::AudioFormatReader> makeRegionReader (std::unique_ptr<juce::AudioFormatReader>,
                                                          FrameRange);
 

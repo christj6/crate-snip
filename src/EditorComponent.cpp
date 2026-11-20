@@ -138,9 +138,15 @@ void EditorComponent::openTrack()
 
     auto reader = std::unique_ptr<juce::AudioFormatReader> (formats.createReaderFor (request.file));
     if (reader == nullptr || reader->lengthInSamples <= 0 || reader->sampleRate <= 0
-        || ! std::isfinite (reader->sampleRate) || reader->numChannels == 0)
+        || ! std::isfinite (reader->sampleRate))
     {
         waveform.setOpenError ("Could not decode this audio file.");
+        return;
+    }
+
+    if (! isSupportedChannelCount (reader->numChannels))
+    {
+        waveform.setOpenError (unsupportedChannelCount);
         return;
     }
 

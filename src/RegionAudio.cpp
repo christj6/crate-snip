@@ -127,7 +127,8 @@ private:
 std::unique_ptr<juce::AudioFormatReader> makeRegionReader (std::unique_ptr<juce::AudioFormatReader> reader,
                                                          FrameRange region)
 {
-    if (reader == nullptr || region.isEmpty() || region.getStart() < 0
+    if (reader == nullptr || ! isSupportedChannelCount (reader->numChannels)
+        || region.isEmpty() || region.getStart() < 0
         || region.getEnd() > reader->lengthInSamples)
         return {};
 
@@ -175,6 +176,9 @@ juce::String regionFilename (const Region& region)
 ExportResult exportRegion (std::unique_ptr<juce::AudioFormatReader> reader, FrameRange region,
                            const juce::File& destination, const std::atomic_bool* cancelled)
 {
+    if (reader != nullptr && ! isSupportedChannelCount (reader->numChannels))
+        return { {}, unsupportedChannelCount };
+
     const auto layout = reader != nullptr ? reader->getChannelLayout() : juce::AudioChannelSet();
     auto section = makeRegionReader (std::move (reader), region);
     if (section == nullptr)

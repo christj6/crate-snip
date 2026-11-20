@@ -58,6 +58,26 @@ int runRegionAudioTests()
     writer.reset();
 
     const cratesnip::FrameRange region { 2, 7 };
+    check (! cratesnip::isSupportedChannelCount (0), "zero channels are rejected");
+    check (cratesnip::isSupportedChannelCount (cratesnip::maxSupportedChannels), "the channel limit is inclusive");
+    auto oversizedReader = openWav (source.getFile());
+    auto oversizedPreviewReader = openWav (source.getFile());
+    if (oversizedReader != nullptr && oversizedPreviewReader != nullptr)
+    {
+        oversizedReader->numChannels = cratesnip::maxSupportedChannels + 1;
+        oversizedPreviewReader->numChannels = oversizedReader->numChannels;
+        juce::TemporaryFile rejected (".wav");
+        const auto result = cratesnip::exportRegion (std::move (oversizedReader), region, rejected.getFile());
+        check (result.error == cratesnip::unsupportedChannelCount && ! rejected.getFile().exists(),
+               "oversized channel count is rejected before the writer opens");
+        check (cratesnip::makePreviewSource (std::move (oversizedPreviewReader), region, false) == nullptr,
+               "oversized channel count is rejected before preview");
+    }
+    else
+    {
+        check (false, "open channel validation fixtures");
+    }
+
     auto preview = cratesnip::makePreviewSource (openWav (source.getFile()), region, false);
     check (preview != nullptr && preview->getTotalLength() == 5, "preview range length");
     if (preview == nullptr)
