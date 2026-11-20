@@ -129,10 +129,12 @@ juce::uint64 combineWords (DWORD high, DWORD low)
 
 } // namespace
 
-SourceFileAccess::SourceFileAccess (const juce::File& file)
+SourceFileAccess::SourceFileAccess (const juce::File& file, Sharing sharing)
 {
     const auto path = file.getFullPathName();
-    auto opened = CreateFileW (path.toWideCharPointer(), GENERIC_READ, FILE_SHARE_READ, nullptr,
+    const DWORD shareMode = sharing == Sharing::allowWriters ? FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE
+                                                             : FILE_SHARE_READ;
+    auto opened = CreateFileW (path.toWideCharPointer(), GENERIC_READ, shareMode, nullptr,
                                OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (opened != INVALID_HANDLE_VALUE)
         handle.reset (opened);

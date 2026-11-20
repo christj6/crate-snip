@@ -421,8 +421,10 @@ void EditorComponent::startPreview()
 
     const auto bounds = active->frames;
     const auto currentFrame = previewSource != nullptr ? currentPreviewFrame() : bounds.getStart();
-    SourceFileAccess access (request.file);
-    if (! sourceVersion || access.version() != sourceVersion)
+    // Checked again at each start, so the preview needn't hold the file: if it changes
+    // mid-preview, the next start reports it.
+    if (! sourceVersion
+        || SourceFileAccess (request.file, SourceFileAccess::Sharing::allowWriters).version() != sourceVersion)
     {
         stopPreview();
         setStatus (sourceUnavailable);
@@ -462,7 +464,6 @@ void EditorComponent::startPreview()
     const auto readerRate = nextSource->getAudioFormatReader()->sampleRate;
     transport.setSource (nextSource.get(), 32768, &readAhead, readerRate);
     previewSource = std::move (nextSource);
-    previewAccess = std::move (access);
     previewRange = bounds;
 
     const auto startFrame = bounds.contains (currentFrame) ? currentFrame : bounds.getStart();
@@ -485,7 +486,6 @@ void EditorComponent::stopPreview()
     transport.stop();
     transport.setSource (nullptr);
     previewSource.reset();
-    previewAccess.reset();
     waveform.setPreviewFrame (std::nullopt);
     updateControls();
 }

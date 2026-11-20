@@ -61,7 +61,6 @@ private:
 
     juce::AudioDeviceManager deviceManager;
     juce::TimeSliceThread readAhead { "CrateSnip preview" };
-    std::optional<SourceFileAccess> previewAccess;
     std::unique_ptr<juce::AudioFormatReaderSource> previewSource;
     juce::AudioTransportSource transport;
     juce::AudioSourcePlayer player;

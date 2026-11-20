@@ -173,6 +173,18 @@ int runRegionAudioTests()
     if (! version)
         return failures;
 
+    {
+        using Sharing = cratesnip::SourceFileAccess::Sharing;
+        const auto canWriteWhileOpen = [&] (Sharing sharing)
+        {
+            const cratesnip::SourceFileAccess access (source.getFile(), sharing);
+            juce::FileOutputStream writer (source.getFile());
+            return access.version() == version && writer.openedOk();
+        };
+        check (canWriteWhileOpen (Sharing::allowWriters), "preview access lets other programs write the source");
+        check (! canWriteWhileOpen (Sharing::blockWriters), "export access keeps the source unchanged");
+    }
+
     const auto batch = cratesnip::exportRegions (source.getFile(), *version, cuts, folder);
     check (batch.size() == 3, "one result for each cut");
     if (batch.size() == 3)

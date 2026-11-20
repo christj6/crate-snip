@@ -48,11 +48,15 @@ struct SourceVersion
     bool operator== (const SourceVersion&) const = default;
 };
 
-// Keeps the path stable during a read, while allowing other readers such as foobar2000.
+// Opens the source to read its version. blockWriters keeps the file unchanged while the handle
+// is open (used for exports); allowWriters lets foobar2000 edit tags, or anything else rename or
+// delete the file, meanwhile (used for preview, where a changed file only needs reopening).
 class SourceFileAccess
 {
 public:
-    explicit SourceFileAccess (const juce::File&);
+    enum class Sharing { blockWriters, allowWriters };
+
+    explicit SourceFileAccess (const juce::File&, Sharing = Sharing::blockWriters);
     std::optional<SourceVersion> version() const;
 
 private:
