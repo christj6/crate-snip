@@ -78,6 +78,9 @@ private:
 
 inline constexpr auto sourceUnavailable = "The source changed or is unavailable. Reopen the track in CrateSnip.";
 
+std::unique_ptr<juce::AudioFormatReader> openAudioReader (juce::AudioFormatManager&, const juce::File&,
+                                                         const std::atomic_bool* cancelled = nullptr);
+
 struct VerifiedPreview
 {
     std::unique_ptr<juce::AudioFormatReaderSource> source;

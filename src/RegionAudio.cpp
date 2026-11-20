@@ -1,4 +1,5 @@
 #include "RegionAudio.h"
+#include "AacAudio.h"
 
 #ifndef NOMINMAX
  #define NOMINMAX
@@ -232,6 +233,15 @@ std::unique_ptr<juce::AudioFormatReaderSource> makePreviewSource (std::unique_pt
     return preview;
 }
 
+std::unique_ptr<juce::AudioFormatReader> openAudioReader (juce::AudioFormatManager& formats, const juce::File& file,
+                                                         const std::atomic_bool* cancelled)
+{
+    if (isAacInput (file))
+        return openAacReader (file, std::make_unique<SourceFileAccess> (file), cancelled);
+
+    return std::unique_ptr<juce::AudioFormatReader> (formats.createReaderFor (file));
+}
+
 VerifiedPreview openVerifiedPreview (juce::AudioFormatManager& formats, const juce::File& file,
                                      const std::optional<SourceVersion>& expectedVersion,
                                      FrameRange region, bool looping)
@@ -242,6 +252,13 @@ VerifiedPreview openVerifiedPreview (juce::AudioFormatManager& formats, const ju
     auto stream = std::make_unique<SourceFileAccess> (file, SourceFileAccess::Sharing::allowWriters);
     if (stream->version() != expectedVersion)
         return { {}, sourceUnavailable };
+
+    if (isAacInput (file))
+    {
+        if (auto preview = makePreviewSource (openAacReader (file, std::move (stream), nullptr), region, looping))
+            return { std::move (preview), {} };
+        return { {}, "Could not read the selected AAC region." };
+    }
 
     // Match JUCE's file-based decoder order, using the verified stream for every attempt.
     for (auto* format : formats)
@@ -378,7 +395,7 @@ std::vector<ExportResult> exportRegions (const juce::File& source, SourceVersion
         if (cancelled != nullptr && cancelled->load())
             break;
 
-        auto reader = std::unique_ptr<juce::AudioFormatReader> (formats.createReaderFor (source));
+        auto reader = openAudioReader (formats, source, cancelled);
         results.push_back (exportRegion (std::move (reader), region.frames,
                                          folder.getChildFile (regionFilename (region)), cancelled));
     }

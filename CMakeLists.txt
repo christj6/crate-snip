@@ -20,6 +20,8 @@ juce_add_gui_app(CrateSnip
 
 target_sources(CrateSnip
     PRIVATE
+        src/AacAudio.cpp
+        src/AacAudio.h
         src/FoobarRemote.cpp
         src/FoobarRemote.h
         src/EditorComponent.cpp
@@ -42,6 +44,7 @@ target_compile_definitions(CrateSnip
 target_link_libraries(CrateSnip
     PRIVATE
         juce::juce_audio_utils
+        mfuuid
     PUBLIC
         juce::juce_recommended_config_flags
         juce::juce_recommended_lto_flags
@@ -52,6 +55,7 @@ if(CRATE_SNIP_BUILD_TESTS)
 
     target_sources(CrateSnipTests
         PRIVATE
+            src/AacAudio.cpp
             src/LaunchRequest.cpp
             src/RegionAudio.cpp
             src/WaveformView.cpp
@@ -70,6 +74,7 @@ if(CRATE_SNIP_BUILD_TESTS)
     target_link_libraries(CrateSnipTests
         PRIVATE
             juce::juce_audio_utils
+            mfuuid
         PUBLIC
             juce::juce_recommended_config_flags
             juce::juce_recommended_warning_flags)

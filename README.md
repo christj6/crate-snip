@@ -13,7 +13,7 @@ CrateSnip is a Windows companion app for foobar2000 that turns parts of tracks i
 
 ## First release
 
-- Open local PCM WAV and AIFF, FLAC, MP3, Ogg Vorbis, Opus, and WMA files. See the [tested audio formats](docs/audio-formats.md) for supported variants.
+- Open local PCM WAV and AIFF, FLAC, MP3, Ogg Vorbis, Opus, WMA, and AAC files, including AAC audio in `.m4a` and `.mp4`. See the [tested audio formats](docs/audio-formats.md) for supported variants.
 - Suggest lower camel case filenames such as `beatles-tomorrowNeverKnows-chunk1.wav`. A leading “The” is dropped from artist names. Symbols inside a word are dropped (`A$AP Rocky` becomes `aapRocky`), while separators such as `/` and `-` start a new word (`AC/DC` becomes `acDc`). If either tag is missing, the suggestion uses the source filename.
 - Export 24-bit PCM WAVs at the source sample rate and channel count. Add a suffix when a filename is already taken.
 

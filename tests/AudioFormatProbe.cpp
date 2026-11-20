@@ -1,4 +1,4 @@
-#include "RegionAudio.h"
+#include "AacAudio.h"
 
 #include <cmath>
 #include <iostream>
@@ -23,9 +23,12 @@ juce::var probeFile (juce::AudioFormatManager& formats, const juce::File& file)
     if (! file.existsAsFile())
         return finish ("Missing fixture");
 
-    auto reader = std::unique_ptr<juce::AudioFormatReader> (formats.createReaderFor (file));
+    auto reader = cratesnip::openAudioReader (formats, file);
     if (reader == nullptr)
     {
+        if (cratesnip::isAacInput (file))
+            return finish ("Could not open", "AAC (Windows Media Foundation)");
+
         const auto* matched = formats.findFormatForFileExtension (file.getFileExtension());
         return matched == nullptr ? finish ("No decoder") : finish ("Could not open", matched->getFormatName());
     }
@@ -55,7 +58,7 @@ juce::var probeFile (juce::AudioFormatManager& formats, const juce::File& file)
 
     juce::TemporaryFile output (".wav");
     const auto saved = cratesnip::exportRegion (
-        std::unique_ptr<juce::AudioFormatReader> (formats.createReaderFor (file)), cut, output.getFile());
+        cratesnip::openAudioReader (formats, file), cut, output.getFile());
     if (saved.error.isNotEmpty())
         return finish ("Export failed", saved.error);
 

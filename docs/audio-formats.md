@@ -1,14 +1,14 @@
 # Audio format compatibility
 
-The Windows Release build passed 15 of 37 codec and container combinations in this sweep. Each row represents one generated audio file.
+The Windows Release build passed 18 of 37 codec and container combinations in this sweep. Each row represents one generated audio file.
 
-CrateSnip’s foobar2000 launcher passes the file path, track metadata, and the playhead when available. The standalone editor opens the file with JUCE’s readers. foobar2000 has its own decoders for AAC and Apple Lossless. [foobar2000’s supported formats](https://www.foobar2000.org/formats)
+CrateSnip’s foobar2000 launcher passes the file path, track metadata, and the playhead when available. The standalone editor uses Windows Media Foundation for AAC and JUCE’s readers for the other supported formats. AAC is decoded to a temporary audio file when opened, then the waveform, preview, and export read from it. Windows removes the temporary file when the editor closes. Windows N editions need the Media Feature Pack for AAC. [Windows AAC support](https://learn.microsoft.com/en-us/windows/win32/medfound/supported-media-formats-in-media-foundation) · [Media Feature Pack](https://support.microsoft.com/en-us/windows/experience/platform-variants/media-feature-pack-for-windows-n)
 
 ## Tested inputs
 
 **Pass** means CrateSnip opened the file, rendered a selected region through the preview code, and exported a readable 24-bit WAV. The probe checks that the WAV has the expected length, sample rate, and channel count. It compares audio samples for up to the first two channels. The test runs without opening the editor or using an audio device.
 
-**No decoder** means no registered reader handles that extension. **Could not open** means a reader handles the extension but did not return a usable audio stream for the test file.
+**No decoder** means CrateSnip has no reader for that extension. **Could not open** means a reader handles the extension but could not return a usable audio stream for the test file.
 
 | Audio format | Extension | Result | Reader |
 | --- | --- | --- | --- |
@@ -37,10 +37,10 @@ CrateSnip’s foobar2000 launcher passes the file path, track metadata, and the 
 | WMA v1 | `.wma` | Pass | Windows Media |
 | WMA v2 | `.wma` | Pass | Windows Media |
 | ASF with WMA v2 | `.asf` | Pass | Windows Media |
-| AAC-LC in ADTS | `.aac` | No decoder | — |
-| AAC-LC in M4A | `.m4a` | No decoder | — |
-| AAC-LC in audio-only MP4 | `.mp4` | No decoder | — |
-| Apple Lossless in M4A | `.m4a` | No decoder | — |
+| AAC-LC in ADTS | `.aac` | Pass | AAC (Windows Media Foundation) |
+| AAC-LC in M4A | `.m4a` | Pass | AAC (Windows Media Foundation) |
+| AAC-LC in audio-only MP4 | `.mp4` | Pass | AAC (Windows Media Foundation) |
+| Apple Lossless in M4A | `.m4a` | Could not open | AAC (Windows Media Foundation) |
 | WavPack lossless | `.wv` | No decoder | — |
 | True Audio | `.tta` | No decoder | — |
 | CAF PCM | `.caf` | No decoder | — |

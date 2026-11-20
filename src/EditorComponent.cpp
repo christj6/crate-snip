@@ -53,7 +53,7 @@ juce::String rangeText (FrameRange range, double sampleRate)
 
 struct EditorComponent::StartupData
 {
-    void openTrack (const juce::File&);
+    void openTrack (const juce::File&, const std::atomic_bool* cancelled);
 
     std::optional<SourceVersion> version;
     std::unique_ptr<juce::AudioFormatReader> reader;
@@ -213,7 +213,7 @@ void EditorComponent::startLoading()
                       file = request.file, cancelled = &cancelFileJobs]
     {
         StartupData data;
-        data.openTrack (file);
+        data.openTrack (file, cancelled);
         if (cancelled->load())
             return;
 
@@ -231,7 +231,7 @@ void EditorComponent::startLoading()
     });
 }
 
-void EditorComponent::StartupData::openTrack (const juce::File& file)
+void EditorComponent::StartupData::openTrack (const juce::File& file, const std::atomic_bool* cancelled)
 {
     if (! file.existsAsFile())
     {
@@ -249,7 +249,7 @@ void EditorComponent::StartupData::openTrack (const juce::File& file)
 
     juce::AudioFormatManager trackFormats;
     trackFormats.registerBasicFormats();
-    std::unique_ptr<juce::AudioFormatReader> opened (trackFormats.createReaderFor (file));
+    auto opened = openAudioReader (trackFormats, file, cancelled);
     if (opened == nullptr || opened->lengthInSamples <= 0 || opened->sampleRate <= 0
         || ! std::isfinite (opened->sampleRate))
     {
