@@ -125,6 +125,50 @@ EditorComponent::~EditorComponent()
     readAhead.stopThread (-1);
 }
 
+void EditorComponent::requestClose (std::function<void()> close)
+{
+    if (closePrompt != nullptr || closeAfterExport)
+        return;
+
+    if (! exporting && regions.empty())
+    {
+        close();
+        return;
+    }
+
+    const auto message = exporting
+        ? "Closing now will cancel any unfinished exports and discard the region markers."
+        : "Closing this window will discard the region markers.";
+    closePrompt = std::make_unique<juce::AlertWindow> ("Close CrateSnip?", message,
+                                                      juce::MessageBoxIconType::WarningIcon, this);
+    closePrompt->addButton (exporting ? "Cancel export and close" : "Discard markers and close", 1);
+    closePrompt->addButton ("Keep editing", 0, juce::KeyPress (juce::KeyPress::escapeKey),
+                            juce::KeyPress (juce::KeyPress::returnKey));
+    closePrompt->enterModalState (true, juce::ModalCallbackFunction::create (
+        [safe = juce::Component::SafePointer<EditorComponent> (this), close = std::move (close)] (int result) mutable
+        {
+            if (safe == nullptr)
+                return;
+
+            safe->closePrompt.reset();
+            if (result != 1)
+                return;
+
+            if (! safe->exporting)
+            {
+                close();
+                return;
+            }
+
+            // Let the worker finish cancelling before quitting, without blocking the message thread.
+            safe->closeAfterExport = std::move (close);
+            safe->cancelExport.store (true);
+            safe->setStatus ("Cancelling export before closing...");
+            safe->setEnabled (false);
+        }));
+    closePrompt->getButton ("Keep editing")->grabKeyboardFocus();
+}
+
 void EditorComponent::openTrack()
 {
     trackTitle.setText (request.title.isNotEmpty() ? request.title : request.file.getFileNameWithoutExtension(),
@@ -505,6 +549,13 @@ void EditorComponent::beginExport()
 void EditorComponent::exportFinished (const std::vector<Region>& cuts, const std::vector<ExportResult>& results)
 {
     exporting = false;
+    if (closeAfterExport)
+    {
+        auto close = std::move (closeAfterExport);
+        close();
+        return;
+    }
+
     int saved = 0;
     juce::StringArray errors;
     for (size_t i = 0; i < results.size(); ++i)

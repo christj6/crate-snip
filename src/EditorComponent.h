@@ -15,6 +15,8 @@ public:
     explicit EditorComponent (LaunchRequest);
     ~EditorComponent() override;
 
+    void requestClose (std::function<void()>);
+
 private:
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -70,6 +72,8 @@ private:
     bool exporting = false;
     bool useSessionFolder = false;
     juce::File exportFolder;
+    std::unique_ptr<juce::AlertWindow> closePrompt;
+    std::function<void()> closeAfterExport;
 
     FoobarRemote foobar;
     juce::Label trackTitle, trackInfo, selectionInfo, folderInfo, status;

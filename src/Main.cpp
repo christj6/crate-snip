@@ -27,6 +27,12 @@ public:
         juce::JUCEApplication::getInstance()->systemRequestedQuit();
     }
 
+    void requestClose()
+    {
+        static_cast<EditorComponent*> (getContentComponent())->requestClose (
+            [] { juce::JUCEApplicationBase::quit(); });
+    }
+
 private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MainWindow)
 };
@@ -43,6 +49,14 @@ public:
     void initialise (const juce::String&) override
     {
         mainWindow = std::make_unique<MainWindow> (getCommandLineParameterArray());
+    }
+
+    void systemRequestedQuit() override
+    {
+        if (mainWindow != nullptr)
+            mainWindow->requestClose();
+        else
+            quit();
     }
 
     void shutdown() override

@@ -21,7 +21,7 @@ CrateSnip is a Windows companion app for foobar2000 that turns parts of tracks i
 
 CrateSnip is a standalone JUCE app with a small native foobar2000 launcher. The launcher reads the selected track and passes the playhead when that track is playing. Preview and export share the same sample-frame boundaries. Keeping the audio reader separate from the editor leaves room to use foobar2000’s decoders later. [foobar2000 SDK](https://www.foobar2000.org/SDK) · [JUCE](https://juce.com/)
 
-Preview uses the default stereo output. Each track window keeps its own regions until it closes.
+Preview uses the default stereo output. Each track window keeps its own regions until it closes. CrateSnip asks before discarding markers or cancelling an active export when you close the window.
 
 ## Building
 
