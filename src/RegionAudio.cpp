@@ -265,12 +265,15 @@ VerifiedPreview openVerifiedPreview (juce::AudioFormatManager& formats, const ju
     return { {}, "Could not read the selected region." };
 }
 
+juce::String withoutWavExtension (const juce::String& name)
+{
+    const auto trimmed = name.trimEnd();
+    return trimmed.endsWithIgnoreCase (wavExtension) ? trimmed.dropLastCharacters (4) : name;
+}
+
 juce::String regionFilename (const Region& region)
 {
-    auto name = region.name.trim();
-    if (name.endsWithIgnoreCase (".wav"))
-        name = name.dropLastCharacters (4);
-
+    const auto name = withoutWavExtension (region.name.trim());
     auto stem = juce::File::createLegalFileName (name).trim().trimCharactersAtEnd (" .");
     if (stem.isEmpty())
         return region.suggestedFilename;
@@ -284,7 +287,7 @@ juce::String regionFilename (const Region& region)
         || deviceName == "NUL" || deviceName == "CONIN$" || deviceName == "CONOUT$")
         stem = "_" + stem;
 
-    return stem + ".wav";
+    return stem + wavExtension;
 }
 
 ExportResult exportRegion (std::unique_ptr<juce::AudioFormatReader> reader, FrameRange region,
@@ -298,7 +301,7 @@ ExportResult exportRegion (std::unique_ptr<juce::AudioFormatReader> reader, Fram
     if (section == nullptr)
         return { {}, "Could not read the selected region." };
 
-    const auto requested = destination.withFileExtension (".wav");
+    const auto requested = destination.withFileExtension (wavExtension);
     auto target = requested.getNonexistentSibling();
     TemporaryExport temporary (target.getParentDirectory());
     if (! temporary.isOpen())

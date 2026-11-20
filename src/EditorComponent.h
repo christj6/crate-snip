@@ -80,7 +80,7 @@ private:
 
     std::unique_ptr<FoobarRemote> foobar;
     juce::Label trackTitle, trackInfo, selectionInfo, folderInfo, status;
-    juce::Label regionsTitle, filenameLabel;
+    juce::Label regionsTitle, filenameLabel, filenameSuffix;
     juce::ListBox regionList { "Regions" };
     juce::TextEditor filename;
     juce::TextButton remove { "Remove region" };

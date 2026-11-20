@@ -283,6 +283,10 @@ int runRegionAudioTests()
 
     folder.deleteFile();
 
+    check (cratesnip::withoutWavExtension ("slice.WAV ") == "slice", "a pasted WAV extension is optional");
+    check (cratesnip::withoutWavExtension ("mix.wav.v2") == "mix.wav.v2", "keep dots and internal extension text");
+    const cratesnip::Region named { { 1, 2 }, "Artist - Title - 02.wav", "slice" };
+    check (cratesnip::regionFilename (named) == "slice.wav", "the editable name exports with a WAV extension");
     const cratesnip::Region fallback { { 1, 2 }, "Artist - Title - 02.wav", " .wav " };
     check (cratesnip::regionFilename (fallback) == fallback.suggestedFilename, "empty edited name uses its suggestion");
     const cratesnip::Region reserved { { 1, 2 }, "Artist - Title - 02.wav", "CON.wav" };

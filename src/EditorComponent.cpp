@@ -32,6 +32,17 @@ bool saveExportFolder (const juce::File& folder)
     return settings.saveIfNeeded();
 }
 
+class WavFilenameFilter final : public juce::TextEditor::InputFilter
+{
+public:
+    juce::String filterNewText (juce::TextEditor& editor, const juce::String& text) override
+    {
+        // A pasted filename can include its extension. Preserve text inserted within a name.
+        return editor.getHighlightedRegion().getEnd() == editor.getTotalNumChars()
+                 ? withoutWavExtension (text) : text;
+    }
+};
+
 juce::String rangeText (FrameRange range, double sampleRate)
 {
     return formatTime (static_cast<double> (range.getStart()) / sampleRate)
@@ -58,7 +69,8 @@ EditorComponent::EditorComponent (LaunchRequest launchRequest)
     juce::Component* const components[] { &waveform, &trackTitle, &trackInfo, &selectionInfo, &folderInfo,
                                           &status, &zoomIn, &zoomOut, &fit, &playhead, &preview,
                                           &loopPreview, &exportWav, &folderButton, &pauseFoobar, &resumeFoobar,
-                                          &regionsTitle, &regionList, &filenameLabel, &filename, &remove };
+                                          &regionsTitle, &regionList, &filenameLabel, &filename, &filenameSuffix,
+                                          &remove };
     for (auto* component : components)
         addAndMakeVisible (component);
 
@@ -71,6 +83,13 @@ EditorComponent::EditorComponent (LaunchRequest launchRequest)
     filenameLabel.setText ("WAV filename", juce::dontSendNotification);
     filename.setTitle ("WAV filename");
     filename.setSelectAllWhenFocused (true);
+    filename.setInputFilter (new WavFilenameFilter(), true);
+    filenameSuffix.setText (wavExtension, juce::dontSendNotification);
+    filenameSuffix.setJustificationType (juce::Justification::centred);
+    filenameSuffix.setColour (juce::Label::backgroundColourId, juce::Colour (0xff2c3744));
+    filenameSuffix.setColour (juce::Label::textColourId, juce::Colour (0xffafbfce));
+    filenameSuffix.setInterceptsMouseClicks (false, false);
+    filenameSuffix.setAccessible (false);
     regionList.setTitle ("Regions");
     regionList.setModel (this);
     regionList.setRowHeight (49);
@@ -83,6 +102,15 @@ EditorComponent::EditorComponent (LaunchRequest launchRequest)
             regionList.repaintRow (activeRegion);
         }
     };
+    filename.onFocusLost = [this]
+    {
+        const auto* active = getRegion (activeRegion);
+        const auto text = filename.getText();
+        const auto stem = withoutWavExtension (text);
+        if (active != nullptr && active->name == text && stem != text)
+            filename.setText (stem, false);
+    };
+    filename.onReturnKey = filename.onFocusLost;
     remove.onClick = [this] { removeRegion(); };
 
     zoomIn.onClick = [this] { waveform.zoom (0.5); };
@@ -339,7 +367,7 @@ void EditorComponent::selectRegion (int index)
         regionList.scrollToEnsureRowIsOnscreen (selected);
 
     waveform.setActiveRegion (selected);
-    filename.setText (region != nullptr ? region->name : juce::String(), false);
+    filename.setText (region != nullptr ? withoutWavExtension (region->name) : juce::String(), false);
     updateSelectionInfo();
     updateControls();
 }
@@ -397,6 +425,7 @@ void EditorComponent::updateControls()
     loopPreview.setEnabled (waveform.hasTrack());
     preview.setButtonText (previewSource == nullptr ? "Preview" : "Stop preview");
     filename.setEnabled (hasSelection);
+    filenameSuffix.setEnabled (hasSelection);
     remove.setEnabled (hasSelection);
     folderButton.setEnabled (! loading && ! choosing && ! exporting);
     exportWav.setEnabled (! regions.empty() && ! choosing && ! exporting);
@@ -676,7 +705,9 @@ void EditorComponent::resized()
     regionsTitle.setBounds (side.removeFromTop (26));
     auto nameControls = side.removeFromBottom (91);
     filenameLabel.setBounds (nameControls.removeFromTop (23));
-    filename.setBounds (nameControls.removeFromTop (29));
+    auto filenameRow = nameControls.removeFromTop (29);
+    filenameSuffix.setBounds (filenameRow.removeFromRight (44));
+    filename.setBounds (filenameRow);
     nameControls.removeFromTop (7);
     remove.setBounds (nameControls.removeFromLeft (116));
     regionList.setBounds (side);

@@ -35,6 +35,9 @@ struct Region
     juce::String name;
 };
 
+inline constexpr auto wavExtension = ".wav";
+
+juce::String withoutWavExtension (const juce::String&);
 juce::String regionFilename (const Region&);
 
 struct SourceVersion
