@@ -24,7 +24,6 @@ WaveformView::WaveformView (juce::AudioFormatManager& formats, const std::vector
     addAndMakeVisible (scrollbar);
     setTitle ("Track waveform");
     setWantsKeyboardFocus (true);
-    setMouseCursor (juce::MouseCursor::CrosshairCursor);
 }
 
 WaveformView::~WaveformView()
@@ -104,16 +103,54 @@ juce::Rectangle<int> WaveformView::plot() const
     return getLocalBounds().withTrimmedBottom (40);
 }
 
-float WaveformView::xForFrame (juce::int64 frame) const
+double WaveformView::xForFrame (juce::int64 frame) const
 {
-    return static_cast<float> ((static_cast<double> (frame) - viewStart) / viewLength * plot().getWidth());
+    return (static_cast<double> (frame) - viewStart) / viewLength * plot().getWidth();
 }
 
-juce::int64 WaveformView::frameAtX (float x) const
+juce::int64 WaveformView::frameAtX (double x) const
 {
-    const auto fraction = juce::jlimit (0.0, 1.0, static_cast<double> (x) / juce::jmax (1, plot().getWidth()));
+    const auto fraction = juce::jlimit (0.0, 1.0, x / juce::jmax (1, plot().getWidth()));
     return juce::jlimit (juce::int64 { 0 }, totalFrames,
                         static_cast<juce::int64> (std::llround (viewStart + fraction * viewLength)));
+}
+
+std::optional<WaveformView::RegionEdge> WaveformView::edgeAtX (float x) const
+{
+    constexpr auto hitDistance = 9.0;
+    const auto width = plot().getWidth();
+    std::optional<RegionEdge> nearest;
+    auto nearestDistance = hitDistance;
+
+    for (int i = static_cast<int> (regions.size()) - 1; i >= 0; --i)
+    {
+        const auto range = regions[static_cast<size_t> (i)].frames;
+        for (const auto side : { Drag::start, Drag::end })
+        {
+            const auto edgeX = xForFrame (side == Drag::start ? range.getStart() : range.getEnd());
+            const auto distance = std::abs (x - edgeX);
+            const auto winsTie = ! nearest || (i == activeRegion && nearest->region != i);
+            if (edgeX >= 0 && edgeX <= width
+                && (distance < nearestDistance || (distance == nearestDistance && winsTie)))
+            {
+                nearest = RegionEdge { i, side };
+                nearestDistance = distance;
+            }
+        }
+    }
+    return nearest;
+}
+
+juce::MouseCursor WaveformView::getMouseCursor()
+{
+    const auto pointer = getMouseXYRelative();
+    if (drag == Drag::start || drag == Drag::end
+        || (drag == Drag::none && hasTrack() && plot().contains (pointer)
+            && ! juce::ModifierKeys::getCurrentModifiers().isShiftDown()
+            && edgeAtX (static_cast<float> (pointer.x))))
+        return juce::MouseCursor::LeftRightResizeCursor;
+
+    return juce::MouseCursor::CrosshairCursor;
 }
 
 void WaveformView::paint (juce::Graphics& g)
@@ -143,8 +180,8 @@ void WaveformView::paint (juce::Graphics& g)
         g.reduceClipRegion (area);
         const auto drawRegion = [&] (FrameRange range, bool active)
         {
-            const auto leftX = xForFrame (range.getStart());
-            const auto rightX = xForFrame (range.getEnd());
+            const auto leftX = static_cast<float> (xForFrame (range.getStart()));
+            const auto rightX = static_cast<float> (xForFrame (range.getEnd()));
             g.setColour (juce::Colour (active ? 0x6638a6ef : 0x3338a6ef));
             g.fillRect (juce::Rectangle<float> (leftX, 0, rightX - leftX, static_cast<float> (area.getHeight()))
                             .getIntersection (area.toFloat()));
@@ -153,8 +190,11 @@ void WaveformView::paint (juce::Graphics& g)
             const auto width = active ? 2.0f : 1.0f;
             for (const auto x : { leftX, rightX })
                 if (x >= 0 && x <= static_cast<float> (area.getRight()))
+                {
                     g.fillRect (juce::jmin (x, static_cast<float> (area.getRight()) - width), 0.0f, width,
                                 static_cast<float> (area.getHeight()));
+                    g.fillRect (x - 4.0f, 0.0f, 8.0f, 10.0f);
+                }
         };
 
         for (int i = 0; i < static_cast<int> (regions.size()); ++i)
@@ -207,28 +247,31 @@ void WaveformView::mouseDown (const juce::MouseEvent& e)
         return;
 
     grabKeyboardFocus();
-    if (const auto* active = getRegion (activeRegion); active != nullptr && ! e.mods.isShiftDown())
+    anchorX = e.position.x;
+    if (! e.mods.isShiftDown())
     {
-        const auto distanceToStart = std::abs (e.position.x - xForFrame (active->frames.getStart()));
-        const auto distanceToEnd = std::abs (e.position.x - xForFrame (active->frames.getEnd()));
-        if (juce::jmin (distanceToStart, distanceToEnd) <= 9.0f)
+        if (const auto edge = edgeAtX (anchorX))
         {
-            drag = distanceToStart <= distanceToEnd ? Drag::start : Drag::end;
-            anchorFrame = drag == Drag::start ? active->frames.getEnd() : active->frames.getStart();
-            draggedRegion = activeRegion;
+            const auto range = regions[static_cast<size_t> (edge->region)].frames;
+            drag = edge->side;
+            draggedRegion = edge->region;
+            anchorFrame = drag == Drag::start ? range.getEnd() : range.getStart();
+            const auto movingFrame = drag == Drag::start ? range.getStart() : range.getEnd();
+            edgeOffsetX = xForFrame (movingFrame) - anchorX;
+
+            if (draggedRegion != activeRegion && onRegionSelected)
+                onRegionSelected (draggedRegion);
             return;
         }
     }
 
     drag = Drag::newRegion;
-    anchorX = e.position.x;
     anchorFrame = frameAtX (anchorX);
     draft = {};
 }
 
 void WaveformView::mouseDrag (const juce::MouseEvent& e)
 {
-    const auto frame = frameAtX (e.position.x);
     if (drag == Drag::newRegion)
     {
         const auto range = regionFromDrag (e.position.x);
@@ -238,16 +281,26 @@ void WaveformView::mouseDrag (const juce::MouseEvent& e)
             repaint (plot());
         }
     }
-    else if (drag != Drag::none && onRegionResized)
+    else if (drag != Drag::none)
     {
-        const auto range = drag == Drag::start ? FrameRange { juce::jmin (frame, anchorFrame - 1), anchorFrame }
-                                               : FrameRange { anchorFrame, juce::jmax (frame, anchorFrame + 1) };
-        onRegionResized (draggedRegion, range);
+        resizeDraggedRegion (e.position.x);
     }
+}
+
+void WaveformView::resizeDraggedRegion (float x)
+{
+    const auto frame = frameAtX (x + edgeOffsetX);
+    const auto range = drag == Drag::start ? FrameRange { juce::jmin (frame, anchorFrame - 1), anchorFrame }
+                                           : FrameRange { anchorFrame, juce::jmax (frame, anchorFrame + 1) };
+    if (onRegionResized)
+        onRegionResized (draggedRegion, range);
 }
 
 void WaveformView::mouseUp (const juce::MouseEvent& e)
 {
+    if (drag == Drag::start || drag == Drag::end)
+        resizeDraggedRegion (e.position.x);
+
     const auto previousDrag = std::exchange (drag, Drag::none);
     if (previousDrag != Drag::newRegion)
         return;

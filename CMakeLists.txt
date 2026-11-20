@@ -54,9 +54,11 @@ if(CRATE_SNIP_BUILD_TESTS)
         PRIVATE
             src/LaunchRequest.cpp
             src/RegionAudio.cpp
+            src/WaveformView.cpp
             tests/AudioFormatProbe.cpp
             tests/LaunchRequestTests.cpp
-            tests/RegionAudioTests.cpp)
+            tests/RegionAudioTests.cpp
+            tests/WaveformViewTests.cpp)
 
     target_include_directories(CrateSnipTests PRIVATE src)
 
@@ -67,7 +69,7 @@ if(CRATE_SNIP_BUILD_TESTS)
 
     target_link_libraries(CrateSnipTests
         PRIVATE
-            juce::juce_audio_formats
+            juce::juce_audio_utils
         PUBLIC
             juce::juce_recommended_config_flags
             juce::juce_recommended_warning_flags)

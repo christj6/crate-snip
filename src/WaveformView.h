@@ -38,7 +38,13 @@ public:
 
 private:
     enum class Drag { none, newRegion, start, end };
+    struct RegionEdge
+    {
+        int region;
+        Drag side;
+    };
 
+    juce::MouseCursor getMouseCursor() override;
     void paint (juce::Graphics&) override;
     void resized() override;
     void mouseDown (const juce::MouseEvent&) override;
@@ -51,9 +57,11 @@ private:
     void setView (double start, double length);
     void zoomAt (double factor, double fraction);
     const Region* getRegion (int) const;
-    float xForFrame (juce::int64 frame) const;
-    juce::int64 frameAtX (float x) const;
+    double xForFrame (juce::int64 frame) const;
+    juce::int64 frameAtX (double x) const;
+    std::optional<RegionEdge> edgeAtX (float x) const;
     FrameRange regionFromDrag (float x) const;
+    void resizeDraggedRegion (float x);
     juce::Rectangle<int> plot() const;
 
     const std::vector<Region>& regions;
@@ -72,6 +80,7 @@ private:
     Drag drag = Drag::none;
     juce::int64 anchorFrame = 0;
     float anchorX = 0;
+    double edgeOffsetX = 0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (WaveformView)
 };

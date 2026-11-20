@@ -6,7 +6,7 @@ CrateSnip is a Windows companion app for foobar2000 that turns parts of tracks i
 
 1. Right-click a track in foobar2000 and choose **Cut samples…**.
 2. Zoom with the mouse wheel or the zoom buttons. Pan with the scrollbar or **Shift** + wheel. **Playhead** returns to the point captured from foobar2000.
-3. Drag across the waveform to add a cut. Select any cut on the waveform or in **Regions**, then drag either edge to refine it. Hold **Shift** while starting a drag on an edge to create a new cut there.
+3. Drag across the waveform to add a cut. Grab either edge of an existing cut on the waveform and drag it to move its start or end. Hold **Shift** while starting a drag on an edge to create a new cut there.
 4. Click **Preview** to hear the selected cut once. Turn on **Loop preview** to repeat it while you adjust its edges. Use **Pause foobar2000** if the track is still playing in the player.
 5. Edit the selected cut’s **WAV filename** or keep its numbered suggestion. Chunk numbers follow creation order.
 6. Choose an **Export folder** and click **Export All**. CrateSnip remembers the folder for future tracks.
