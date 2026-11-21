@@ -32,7 +32,7 @@ git submodule update --init
 build.cmd
 ```
 
-`build.cmd` configures `build\` on first use and builds Debug and Release. The app is `build\CrateSnip_artefacts\Release\CrateSnip.exe`. To build the tests as well, configure with `cmake -S . -B build -DCRATE_SNIP_BUILD_TESTS=ON` and run `build\CrateSnipTests_artefacts\Release\CrateSnipTests.exe`.
+`build.cmd` configures `build\` on first use and builds Debug and Release. The app is `build\CrateSnip_artefacts\Release\CrateSnip.exe`. If the foobar2000 component is installed, `build.cmd` also copies the new Release app over the component's copy, so foobar2000 runs it from the next **Cut samples…** without reinstalling. Close any CrateSnip windows first; the copy fails while one is open. Changes to the launcher itself (`launcher\`) still need the component rebuilt and reinstalled. To build the tests as well, configure with `cmake -S . -B build -DCRATE_SNIP_BUILD_TESTS=ON` and run `build\CrateSnipTests_artefacts\Release\CrateSnipTests.exe`.
 
 ## Building the foobar2000 launcher
 
