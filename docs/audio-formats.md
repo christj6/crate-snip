@@ -52,6 +52,31 @@ CrateSnip’s foobar2000 launcher passes the file path, track metadata, and the 
 
 The RF64 fixture was recognized as WAV, but the reader did not report a usable audio stream. WMA results use the Windows Media reader available on the test machine.
 
+## Timing alignment
+
+MP3 and AAC encoders add silence at the start of a file and pad the end, and record how much. foobar2000 removes it, so its playhead counts from the first real sample. CrateSnip reads the same records and trims the same amount, so the playhead marker, the waveform, previews, and exports line up with what you heard in foobar2000:
+
+- **MP3:** the LAME tag's encoder delay plus the decoder's 529 samples, and the padding. The length comes from the recorded frame count, which also corrects JUCE reporting double the length of 22.05 and 24 kHz MP3s.
+- **M4A and MP4:** iTunes' `iTunSMPB` tag, or the track's edit list.
+
+Files without these records (raw `.aac`, MP3s with no LAME tag) aren't trimmed, which matches FFmpeg.
+
+Measured with a tone that starts at exactly 1 second, against FFmpeg, which trims the same way as foobar2000:
+
+| File | Before trimming | After |
+| --- | --- | --- |
+| FLAC, Ogg Vorbis, Opus | Exact | Exact |
+| MP3 CBR and VBR, LAME tag | 1105 samples (25 ms) late | Exact |
+| MP3 at 22.05 kHz | 1105 samples late, double length | Exact |
+| AAC in M4A, at 44.1 and 48 kHz | 1024 samples (23 ms) late | Exact |
+| Raw AAC (ADTS), MP3 without LAME tag | Same as FFmpeg | Same as FFmpeg |
+
+To measure files yourself, encode the same signal several ways and compare where the first loud sample lands:
+
+```powershell
+.\build\CrateSnipTests_artefacts\Release\CrateSnipTests.exe --probe-onsets 'reference.wav' 'encoded.mp3' 'encoded.m4a'
+```
+
 ## Rerun the sweep
 
 From the repository root, with `ffmpeg.exe` and `ffprobe.exe` on `PATH`, run the following in PowerShell. The script generates short test tones and removes them when finished. CrateSnip itself does not use FFmpeg for decoding.

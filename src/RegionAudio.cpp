@@ -1,5 +1,6 @@
 #include "RegionAudio.h"
 #include "AacAudio.h"
+#include "Gapless.h"
 
 #ifndef NOMINMAX
  #define NOMINMAX
@@ -236,10 +237,17 @@ std::unique_ptr<juce::AudioFormatReaderSource> makePreviewSource (std::unique_pt
 std::unique_ptr<juce::AudioFormatReader> openAudioReader (juce::AudioFormatManager& formats, const juce::File& file,
                                                          const std::atomic_bool* cancelled)
 {
-    if (isAacInput (file))
-        return openAacReader (file, std::make_unique<SourceFileAccess> (file), cancelled);
+    std::optional<GaplessInfo> gapless;
+    {
+        juce::FileInputStream stream (file);
+        if (stream.openedOk())
+            gapless = readGaplessInfo (stream, file);
+    }
 
-    return std::unique_ptr<juce::AudioFormatReader> (formats.createReaderFor (file));
+    if (isAacInput (file))
+        return trimToRealAudio (openAacReader (file, std::make_unique<SourceFileAccess> (file), cancelled), gapless);
+
+    return trimToRealAudio (std::unique_ptr<juce::AudioFormatReader> (formats.createReaderFor (file)), gapless);
 }
 
 VerifiedPreview openVerifiedPreview (juce::AudioFormatManager& formats, const juce::File& file,
@@ -253,9 +261,15 @@ VerifiedPreview openVerifiedPreview (juce::AudioFormatManager& formats, const ju
     if (stream->version() != expectedVersion)
         return { {}, sourceUnavailable };
 
+    // Trim the same padding as openAudioReader, so preview frames match the waveform's.
+    const auto gapless = readGaplessInfo (*stream, file);
+    if (! stream->setPosition (0))
+        return { {}, sourceUnavailable };
+
     if (isAacInput (file))
     {
-        if (auto preview = makePreviewSource (openAacReader (file, std::move (stream), nullptr), region, looping))
+        if (auto preview = makePreviewSource (trimToRealAudio (openAacReader (file, std::move (stream), nullptr), gapless),
+                                              region, looping))
             return { std::move (preview), {} };
         return { {}, "Could not read the selected AAC region." };
     }
@@ -273,7 +287,7 @@ VerifiedPreview openVerifiedPreview (juce::AudioFormatManager& formats, const ju
         if (reader != nullptr)
         {
             stream.release(); // The reader owns the verified handle from here.
-            if (auto preview = makePreviewSource (std::move (reader), region, looping))
+            if (auto preview = makePreviewSource (trimToRealAudio (std::move (reader), gapless), region, looping))
                 return { std::move (preview), {} };
             break;
         }

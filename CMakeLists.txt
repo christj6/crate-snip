@@ -26,6 +26,8 @@ target_sources(CrateSnip
         src/FoobarRemote.h
         src/EditorComponent.cpp
         src/EditorComponent.h
+        src/Gapless.cpp
+        src/Gapless.h
         src/LaunchRequest.cpp
         src/LaunchRequest.h
         src/Main.cpp
@@ -56,11 +58,13 @@ if(CRATE_SNIP_BUILD_TESTS)
     target_sources(CrateSnipTests
         PRIVATE
             src/AacAudio.cpp
+            src/Gapless.cpp
             src/LaunchRequest.cpp
             src/RegionAudio.cpp
             src/WaveformView.cpp
             tests/AacAudioTests.cpp
             tests/AudioFormatProbe.cpp
+            tests/GaplessTests.cpp
             tests/LaunchRequestTests.cpp
             tests/RegionAudioTests.cpp
             tests/WaveformViewTests.cpp)

@@ -102,3 +102,50 @@ int probeAudioFormats (const juce::StringArray& files)
     std::cout << juce::JSON::toString (juce::var (results)) << '\n';
     return 0;
 }
+
+// For each file, reports the first frame louder than half scale. Run on encodings of one signal
+// with a sudden onset, the frames should match the WAV's: a later frame means the decoder kept
+// the encoder's start padding, which would shift the playhead and every cut.
+int probeOnsets (const juce::StringArray& files)
+{
+    juce::AudioFormatManager formats;
+    formats.registerBasicFormats();
+
+    juce::Array<juce::var> results;
+    for (const auto& path : files)
+    {
+        const auto file = juce::File::getCurrentWorkingDirectory().getChildFile (path);
+        juce::var record (new juce::DynamicObject);
+        auto* row = record.getDynamicObject();
+        row->setProperty ("file", file.getFileName());
+
+        if (auto reader = cratesnip::openAudioReader (formats, file))
+        {
+            row->setProperty ("decoder", reader->getFormatName());
+            row->setProperty ("rate", reader->sampleRate);
+            row->setProperty ("frames", reader->lengthInSamples);
+
+            juce::int64 onset = -1;
+            juce::AudioBuffer<float> block (static_cast<int> (reader->numChannels), 4096);
+            for (juce::int64 start = 0; onset < 0 && start < reader->lengthInSamples; start += block.getNumSamples())
+            {
+                const auto count = static_cast<int> (juce::jmin (juce::int64 { block.getNumSamples() },
+                                                                reader->lengthInSamples - start));
+                if (! reader->read (&block, 0, count, start, true, true))
+                    break;
+                for (int frame = 0; frame < count && onset < 0; ++frame)
+                    if (std::abs (block.getSample (0, frame)) > 0.5f)
+                        onset = start + frame;
+            }
+            row->setProperty ("onset", onset);
+        }
+        else
+        {
+            row->setProperty ("decoder", "none");
+        }
+        results.add (record);
+    }
+
+    std::cout << juce::JSON::toString (juce::var (results)) << '\n';
+    return 0;
+}

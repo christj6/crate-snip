@@ -98,17 +98,19 @@ void testOddArguments()
 int runRegionAudioTests();
 int runWaveformViewTests();
 int runAacAudioTests();
+int runGaplessTests();
 
 int probeAudioFormats (const juce::StringArray& files);
+int probeOnsets (const juce::StringArray& files);
 
 int wmain (int argc, wchar_t* argv[])
 {
-    if (argc > 1 && juce::String (argv[1]) == "--probe-formats")
+    if (argc > 1 && (juce::String (argv[1]) == "--probe-formats" || juce::String (argv[1]) == "--probe-onsets"))
     {
         juce::StringArray paths;
         for (int i = 2; i < argc; ++i)
             paths.add (juce::String (argv[i]));
-        return probeAudioFormats (paths);
+        return juce::String (argv[1]) == "--probe-formats" ? probeAudioFormats (paths) : probeOnsets (paths);
     }
 
     testFullRequest();
@@ -120,6 +122,7 @@ int wmain (int argc, wchar_t* argv[])
     failures += runRegionAudioTests();
     failures += runWaveformViewTests();
     failures += runAacAudioTests();
+    failures += runGaplessTests();
 
     std::cout << (failures == 0 ? "All CrateSnip tests passed\n" : "CrateSnip tests FAILED\n");
     return failures == 0 ? 0 : 1;
