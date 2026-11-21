@@ -97,6 +97,7 @@ void testOddArguments()
 
 int runRegionAudioTests();
 int runWaveformViewTests();
+int runAacAudioTests();
 
 int probeAudioFormats (const juce::StringArray& files);
 
@@ -118,6 +119,7 @@ int wmain (int argc, wchar_t* argv[])
     testOddArguments();
     failures += runRegionAudioTests();
     failures += runWaveformViewTests();
+    failures += runAacAudioTests();
 
     std::cout << (failures == 0 ? "All CrateSnip tests passed\n" : "CrateSnip tests FAILED\n");
     return failures == 0 ? 0 : 1;

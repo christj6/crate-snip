@@ -2,7 +2,7 @@
 
 The Windows Release build passed 18 of 37 codec and container combinations in this sweep. Each row represents one generated audio file.
 
-CrateSnip’s foobar2000 launcher passes the file path, track metadata, and the playhead when available. The standalone editor uses Windows Media Foundation for AAC and JUCE’s readers for the other supported formats. AAC is decoded to a temporary audio file when opened, then the waveform, preview, and export read from it. Windows removes the temporary file when the editor closes. Windows N editions need the Media Feature Pack for AAC. [Windows AAC support](https://learn.microsoft.com/en-us/windows/win32/medfound/supported-media-formats-in-media-foundation) · [Media Feature Pack](https://support.microsoft.com/en-us/windows/experience/platform-variants/media-feature-pack-for-windows-n)
+CrateSnip’s foobar2000 launcher passes the file path, track metadata, and the playhead when available. The standalone editor uses Windows Media Foundation for AAC and JUCE’s readers for the other supported formats. AAC is decoded to a temporary audio file when opened, then the waveform, preview, and export read from it. Windows removes the temporary file when the editor closes, even after a crash. A power loss or system crash can leave it in `%TEMP%` as `CrateSnip-AAC-*.tmp`; CrateSnip deletes those leftovers the next time it starts. The decoded audio takes about 21 MB per minute of stereo. Windows N editions need the Media Feature Pack for AAC. [Windows AAC support](https://learn.microsoft.com/en-us/windows/win32/medfound/supported-media-formats-in-media-foundation) · [Media Feature Pack](https://support.microsoft.com/en-us/windows/experience/platform-variants/media-feature-pack-for-windows-n)
 
 ## Tested inputs
 

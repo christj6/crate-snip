@@ -22,6 +22,9 @@ namespace
 {
 using Microsoft::WRL::ComPtr;
 
+constexpr auto decodedAacPrefix = "CrateSnip-AAC-";
+constexpr auto decodedAacSuffix = ".tmp";
+
 // Load Media Foundation only for AAC so the other formats still work when it is absent.
 class MediaFoundation
 {
@@ -191,8 +194,7 @@ class DecodedAudio
 public:
     DecodedAudio()
     {
-        const auto file = juce::File::getSpecialLocation (juce::File::tempDirectory)
-                              .getChildFile ("CrateSnip-AAC-" + juce::Uuid().toString() + ".tmp");
+        const auto file = decodedAacFolder().getChildFile (decodedAacPrefix + juce::Uuid().toString() + decodedAacSuffix);
         handle = CreateFileW (file.getFullPathName().toWideCharPointer(), GENERIC_READ | GENERIC_WRITE,
                               0, nullptr, CREATE_NEW, FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE, nullptr);
     }
@@ -406,6 +408,26 @@ std::shared_ptr<const DecodedAudio> decode (const juce::File& file, std::unique_
 bool isAacInput (const juce::File& file)
 {
     return file.hasFileExtension ("aac;adts;m4a;mp4");
+}
+
+juce::File decodedAacFolder()
+{
+    return juce::File::getSpecialLocation (juce::File::tempDirectory);
+}
+
+int deleteLeftoverDecodedAac (const juce::File& folder)
+{
+    int deleted = 0;
+    for (const auto& entry : juce::RangedDirectoryIterator (folder, false,
+                                                             juce::String (decodedAacPrefix) + "*" + decodedAacSuffix,
+                                                             juce::File::findFiles))
+    {
+        // A window's open file was created without sharing, so this fails for it: only
+        // files whose window is gone get deleted.
+        if (DeleteFileW (entry.getFile().getFullPathName().toWideCharPointer()))
+            ++deleted;
+    }
+    return deleted;
 }
 
 std::unique_ptr<juce::AudioFormatReader> openAacReader (const juce::File& file,

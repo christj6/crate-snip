@@ -59,6 +59,7 @@ if(CRATE_SNIP_BUILD_TESTS)
             src/LaunchRequest.cpp
             src/RegionAudio.cpp
             src/WaveformView.cpp
+            tests/AacAudioTests.cpp
             tests/AudioFormatProbe.cpp
             tests/LaunchRequestTests.cpp
             tests/RegionAudioTests.cpp

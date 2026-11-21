@@ -1,3 +1,4 @@
+#include "AacAudio.h"
 #include "EditorComponent.h"
 #include "LaunchRequest.h"
 
@@ -54,6 +55,7 @@ public:
 
     void initialise (const juce::String&) override
     {
+        deleteLeftoverDecodedAac();
         mainWindow = std::make_unique<MainWindow> (getCommandLineParameterArray());
     }
 
